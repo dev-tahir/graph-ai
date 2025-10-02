@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import {
   captureScreenshot,
+  captureChartScreenshot,
   exportDataAsCSV,
   exportDataAsExcel,
   ExportOptions,
@@ -40,7 +41,20 @@ export default function ExportToolbar({
         filename
       };
 
-      await captureScreenshot(targetElementRef.current, options);
+      // Check if this is a chart element (has canvas or chart-related classes)
+      const element = targetElementRef.current;
+      const isChart = element.querySelector('canvas') || 
+                     element.classList.contains('chart') ||
+                     element.classList.contains('chartjs') ||
+                     element.querySelector('[class*="chart"]') ||
+                     title.toLowerCase().includes('chart') ||
+                     title.toLowerCase().includes('graph');
+
+      if (isChart) {
+        await captureChartScreenshot(element, options);
+      } else {
+        await captureScreenshot(element, options);
+      }
     } catch (error) {
       console.error('Export failed:', error);
       alert('Export failed. Please try again.');
@@ -168,7 +182,20 @@ export function FloatingExportButton({
         filename
       };
 
-      await captureScreenshot(targetElementRef.current, options);
+      // Check if this is a chart element
+      const element = targetElementRef.current;
+      const isChart = element.querySelector('canvas') || 
+                     element.classList.contains('chart') ||
+                     element.classList.contains('chartjs') ||
+                     element.querySelector('[class*="chart"]') ||
+                     title.toLowerCase().includes('chart') ||
+                     title.toLowerCase().includes('graph');
+
+      if (isChart) {
+        await captureChartScreenshot(element, options);
+      } else {
+        await captureScreenshot(element, options);
+      }
     } catch (error) {
       console.error('Export failed:', error);
       alert('Export failed. Please try again.');
