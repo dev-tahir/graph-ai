@@ -351,3 +351,212 @@ export async function exportDataAsExcel(
   
   XLSX.writeFile(workbook, filename);
 }
+
+/**
+ * Bulk export multiple graphs
+ */
+export async function bulkExportGraphs(
+  elements: { element: HTMLElement; title: string }[],
+  options: BulkExportOptions
+): Promise<void> {
+  if (elements.length === 0) {
+    throw new Error('No elements to export');
+  }
+
+  if (options.format === 'pdf') {
+    // Export as single PDF
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    for (let i = 0; i < elements.length; i++) {
+      const { element, title } = elements[i];
+      
+      if (i > 0) {
+        pdf.addPage();
+      }
+
+      // Add title if requested
+      if (options.includeTitle) {
+        pdf.setFontSize(16);
+        pdf.text(title, 20, 20);
+      }
+
+      try {
+        // Wait for element to be ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const canvas = await html2canvas(element, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          logging: false,
+          useCORS: true,
+          allowTaint: true,
+          foreignObjectRendering: true,
+          onclone: createHtml2CanvasCloneCallback()
+        });
+
+        const imgData = canvas.toDataURL('image/png', 0.95);
+        
+        // Calculate dimensions to fit on page
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const titleHeight = options.includeTitle ? 30 : 20;
+        const availableHeight = pageHeight - titleHeight - 20;
+        
+        const imgWidth = pageWidth - 40;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        // Scale down if image is too tall
+        const finalHeight = Math.min(imgHeight, availableHeight);
+        const finalWidth = (canvas.width * finalHeight) / canvas.height;
+        
+        pdf.addImage(imgData, 'PNG', 20, titleHeight, finalWidth, finalHeight);
+      } catch (error) {
+        console.error(`Failed to export graph "${title}":`, error);
+        // Add error message to PDF
+        pdf.setFontSize(12);
+        const errorY = options.includeTitle ? 50 : 30;
+        pdf.text(`Failed to export: ${title}`, 20, errorY);
+      }
+    }
+
+    if (options.filename) {
+      pdf.save(options.filename);
+    }
+  } else {
+    // Export as ZIP of PNG images
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+
+    for (const { element, title } of elements) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const canvas = await html2canvas(element, {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          logging: false,
+          useCORS: true,
+          allowTaint: true,
+          foreignObjectRendering: true,
+          onclone: createHtml2CanvasCloneCallback()
+        });
+
+        const dataUrl = canvas.toDataURL('image/png', 0.95);
+        const base64Data = dataUrl.split(',')[1];
+        
+        const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        zip.file(`${sanitizedTitle}.png`, base64Data, { base64: true });
+      } catch (error) {
+        console.error(`Failed to export graph "${title}":`, error);
+      }
+    }
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = options.filename || 'graphs.zip';
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Export dashboard as PDF
+ */
+export async function exportDashboardToPDF(
+  dashboardElement: HTMLElement,
+  title: string,
+  filename: string
+): Promise<void> {
+  try {
+    // Wait for dashboard to be ready
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    const canvas = await html2canvas(dashboardElement, {
+      scale: 1.5,
+      backgroundColor: '#ffffff',
+      logging: false,
+      useCORS: true,
+      allowTaint: true,
+      foreignObjectRendering: true,
+      onclone: createHtml2CanvasCloneCallback(),
+      // Capture larger dashboard
+      width: dashboardElement.scrollWidth,
+      height: dashboardElement.scrollHeight
+    });
+
+    const pdf = new jsPDF({
+      orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    // Add title
+    pdf.setFontSize(18);
+    pdf.text(title, 20, 20);
+    
+    // Add timestamp
+    pdf.setFontSize(10);
+    pdf.text(`Generated on ${new Date().toLocaleString()}`, 20, 30);
+
+    const imgData = canvas.toDataURL('image/png', 0.95);
+    
+    // Calculate dimensions
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const availableHeight = pageHeight - 50; // Space for title and margins
+    
+    const imgWidth = pageWidth - 40;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    
+    if (imgHeight <= availableHeight) {
+      // Fits on one page
+      pdf.addImage(imgData, 'PNG', 20, 40, imgWidth, imgHeight);
+    } else {
+      // Need to split across pages
+      const pagesNeeded = Math.ceil(imgHeight / availableHeight);
+      
+      for (let page = 0; page < pagesNeeded; page++) {
+        if (page > 0) {
+          pdf.addPage();
+        }
+        
+        const yOffset = page * availableHeight;
+        const sourceY = (yOffset / imgHeight) * canvas.height;
+        const sourceHeight = Math.min(
+          (availableHeight / imgHeight) * canvas.height,
+          canvas.height - sourceY
+        );
+        
+        // Create a temporary canvas for this page slice
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = sourceHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        if (tempCtx) {
+          tempCtx.drawImage(
+            canvas,
+            0, sourceY, canvas.width, sourceHeight,
+            0, 0, canvas.width, sourceHeight
+          );
+          
+          const tempImgData = tempCanvas.toDataURL('image/png', 0.95);
+          const sliceHeight = (sourceHeight * imgWidth) / canvas.width;
+          
+          pdf.addImage(tempImgData, 'PNG', 20, page === 0 ? 40 : 20, imgWidth, sliceHeight);
+        }
+      }
+    }
+
+    pdf.save(filename);
+  } catch (error) {
+    console.error('Dashboard export failed:', error);
+    throw new Error(`Failed to export dashboard: ${error}`);
+  }
+}
