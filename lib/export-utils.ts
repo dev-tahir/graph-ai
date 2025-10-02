@@ -245,8 +245,44 @@ export interface BulkExportOptions {
 }
 
 /**
+ * Find the actual chart element within a container
+ * This excludes titles, buttons, and other UI elements
+ */
+function findChartElement(container: HTMLElement): HTMLElement | null {
+  // Try to find canvas (Chart.js, etc.)
+  let chart: Element | null = container.querySelector('canvas');
+  if (chart) return chart as HTMLElement;
+  
+  // Try to find SVG (Recharts, D3, etc.)
+  chart = container.querySelector('svg');
+  if (chart) return chart as HTMLElement;
+  
+  // Try to find a div with common chart class names
+  const chartSelectors = [
+    '[class*="chart-container"]',
+    '[class*="chart-wrapper"]',
+    '[class*="recharts-wrapper"]',
+    '[class*="plotly"]',
+    '[class*="recharts"]',
+    '.recharts-surface',
+    '.plotly-graph-div',
+    '.highcharts-container',
+    '[data-testid*="chart"]',
+    '[id*="chart"]'
+  ];
+  
+  for (const selector of chartSelectors) {
+    chart = container.querySelector(selector);
+    if (chart) return chart as HTMLElement;
+  }
+  
+  return null;
+}
+
+/**
  * Main capture function using isolated rendering
  * **IMPORTANT: Pass ONLY the chart element, not the container with buttons!**
+ * **TIP: Use captureChartOnly() to automatically find and capture just the chart**
  */
 export async function captureScreenshot(
   element: HTMLElement,
@@ -361,14 +397,35 @@ export async function captureScreenshot(
 }
 
 /**
- * Chart-specific capture
+ * Enhanced capture that automatically finds the chart within a container
+ */
+export async function captureChartOnly(
+  containerOrChart: HTMLElement,
+  options: ExportOptions = { format: 'png' }
+): Promise<string | null> {
+  // Try to find the chart element
+  let chartElement = findChartElement(containerOrChart);
+  
+  // If not found, assume the passed element IS the chart
+  if (!chartElement) {
+    chartElement = containerOrChart;
+  }
+  
+  console.log('📊 Chart element found:', chartElement.tagName, chartElement.className);
+  
+  // Use the existing captureScreenshot function
+  return await captureScreenshot(chartElement, options);
+}
+
+/**
+ * Chart-specific capture (backwards compatibility)
  */
 export async function captureChartScreenshot(
   chartElement: HTMLElement,
   options: ExportOptions = { format: 'png' }
 ): Promise<string | null> {
   console.log('📊 Capturing chart...');
-  return await captureScreenshot(chartElement, options);
+  return await captureChartOnly(chartElement, options);
 }
 
 /**
@@ -393,7 +450,8 @@ export async function bulkExportGraphs(
       try {
         console.log(`Processing ${i + 1}/${elements.length}: ${title}`);
         
-        const dataUrl = await captureScreenshot(element, { format: 'png' });
+        // Use chart-only capture to avoid extra UI elements
+        const dataUrl = await captureChartOnly(element, { format: 'png' });
         
         if (!dataUrl) {
           console.warn(`Skipping "${title}" - capture failed`);
@@ -460,7 +518,8 @@ export async function bulkExportGraphs(
 
     for (const { element, title } of elements) {
       try {
-        const dataUrl = await captureScreenshot(element, { format: 'png' });
+        // Use chart-only capture for ZIP exports too
+        const dataUrl = await captureChartOnly(element, { format: 'png' });
         
         if (dataUrl) {
           const base64Data = dataUrl.split(',')[1];
@@ -593,6 +652,42 @@ export async function exportDataAsExcel(
   XLSX.writeFile(workbook, filename);
 }
 
+/**
+ * Debug helper to analyze chart elements in a container
+ */
+export function debugChartElements(container: HTMLElement): void {
+  console.group('🔍 Chart Elements Analysis');
+  
+  const rect = container.getBoundingClientRect();
+  console.log('Container dimensions:', rect.width, 'x', rect.height);
+  
+  // Find all potential chart elements
+  const canvases = container.querySelectorAll('canvas');
+  const svgs = container.querySelectorAll('svg');
+  const chartDivs = container.querySelectorAll('[class*="chart"], [class*="recharts"], [class*="plotly"]');
+  
+  console.log('Found elements:', {
+    canvases: canvases.length,
+    svgs: svgs.length,
+    chartDivs: chartDivs.length
+  });
+  
+  // Check what would be selected
+  const detected = findChartElement(container);
+  if (detected) {
+    const detectedRect = detected.getBoundingClientRect();
+    console.log('Detected chart:', {
+      tag: detected.tagName,
+      className: detected.className,
+      dimensions: `${detectedRect.width}x${detectedRect.height}`
+    });
+  } else {
+    console.log('⚠️ No chart element detected');
+  }
+  
+  console.groupEnd();
+}
+
 export function debugPDFExport(element: HTMLElement): void {
   console.group('📊 Debug');
   
@@ -611,16 +706,27 @@ export function debugPDFExport(element: HTMLElement): void {
 }
 
 export async function testExportWithLogging(element: HTMLElement, title: string = 'test'): Promise<void> {
-  console.group('🧪 Test');
+  console.group('🧪 Test Export');
+  debugChartElements(element);
   debugPDFExport(element);
   
   try {
-    const result = await captureScreenshot(element, {
+    // Test both regular capture and chart-only capture
+    console.log('Testing chart-only capture...');
+    const chartResult = await captureChartOnly(element, {
       format: 'png',
-      filename: `${title}_test.png`
+      filename: `${title}_chart_only_test.png`
     });
     
-    console.log(result ? '✅ Success' : '❌ Failed');
+    console.log('Chart-only result:', chartResult ? '✅ Success' : '❌ Failed');
+    
+    console.log('Testing full element capture...');
+    const fullResult = await captureScreenshot(element, {
+      format: 'png',
+      filename: `${title}_full_test.png`
+    });
+    
+    console.log('Full element result:', fullResult ? '✅ Success' : '❌ Failed');
   } catch (error) {
     console.error('❌ Error:', error);
   }

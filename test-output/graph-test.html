@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph PDF Test - Customer Acquisition Trend</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #chart-container { 
+            width: 800px; 
+            height: 400px; 
+            margin: 20px auto; 
+            padding: 20px;
+            border: 1px solid #ccc;
+            background: white;
+        }
+        .info { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Graph PDF Test: Customer Acquisition Trend</h1>
+    
+    <div class="info">
+        <h3>Graph Info:</h3>
+        <p><strong>ID:</strong> 93626485-a770-466c-b9f7-7ce7c3efd733</p>
+        <p><strong>Type:</strong> LINE</p>
+        <p><strong>Data Rows:</strong> 0</p>
+        <p><strong>Created:</strong> Thu Oct 02 2025 07:34:21 GMT+0500 (Pakistan Standard Time)</p>
+    </div>
+
+    <div class="info">
+        <h3>Test Controls:</h3>
+        <button onclick="testPDFGeneration()">🔧 Test PDF Generation</button>
+        <button onclick="debugElement()">🔍 Debug Element</button>
+        <button onclick="testCanvasOnly()">🎨 Test Canvas Only</button>
+    </div>
+
+    <div id="chart-container">
+        <canvas id="chart"></canvas>
+    </div>
+
+    <script>
+        const { jsPDF } = window.jspdf;
+        
+        // Graph data
+        const graphData = [];
+        const chartConfig = {"data":{"labels":["2020-01","2020-02","2020-03","2020-04","2020-05","2020-06","2020-07","2020-08","2020-09","2020-10","2020-11","2020-12","2021-01","2021-02","2021-03","2021-04","2021-06","2021-07","2021-08","2021-09","2021-10","2021-11","2021-12","2022-01","2022-02","2022-03","2022-04","2022-05"],"datasets":[{"data":[3,6,3,3,1,2,3,4,4,3,2,4,4,4,5,5,1,3,2,5,2,4,4,6,2,4,2,4],"fill":false,"label":"New Customers","tension":0.1,"borderColor":"#3b82f6"}]},"type":"line","options":{"scales":{"x":{"title":{"text":"Month","display":true}},"y":{"title":{"text":"Number of Customers","display":true},"beginAtZero":true}},"plugins":{"title":{"text":"Customer Acquisition Trend","display":true},"legend":{"display":true,"position":"top"}},"responsive":true,"maintainAspectRatio":false}};
+        
+        console.log('Graph data loaded:', graphData.length, 'rows');
+        console.log('Chart config:', chartConfig);
+
+        // Create chart
+        const ctx = document.getElementById('chart').getContext('2d');
+        
+        // Use the actual chart data and config from the database
+        let chartData;
+        let chartOptions;
+        
+        if (chartConfig.data) {
+            // Use the complete chart config from database
+            chartData = chartConfig.data;
+            chartOptions = chartConfig.options || {};
+        } else {
+            // Fallback: use graphData directly
+            chartData = graphData;
+            chartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Customer Acquisition Trend'
+                    }
+                }
+            };
+        }
+
+        try {
+            console.log('📊 Creating chart with type:', chartConfig.type || 'line');
+            console.log('📊 Chart data:', chartData);
+            
+            const chart = new Chart(ctx, {
+                type: chartConfig.type || 'line',
+                data: chartData,
+                options: {
+                    ...chartOptions,
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        onComplete: function() {
+                            console.log('✅ Chart animation completed');
+                            document.body.setAttribute('data-chart-ready', 'true');
+                        }
+                    }
+                }
+            });
+            
+            console.log('✅ Chart created successfully');
+        } catch (error) {
+            console.error('❌ Chart creation failed:', error);
+            document.body.setAttribute('data-chart-error', error.message);
+        }
+
+        // Test functions
+        function debugElement() {
+            const element = document.getElementById('chart-container');
+            console.log('=== Element Debug ===');
+            console.log('Element:', element);
+            console.log('Dimensions:', element.getBoundingClientRect());
+            console.log('Computed style:', window.getComputedStyle(element));
+            console.log('Canvas:', document.getElementById('chart'));
+        }
+
+        function testCanvasOnly() {
+            const element = document.getElementById('chart-container');
+            console.log('=== Canvas Test ===');
+            
+            html2canvas(element, {
+                scale: 2,
+                backgroundColor: '#ffffff',
+                logging: true,
+                useCORS: true
+            }).then(canvas => {
+                console.log('✅ Canvas generated successfully');
+                console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
+                
+                // Create download link for canvas
+                const link = document.createElement('a');
+                link.download = 'test-canvas.png';
+                link.href = canvas.toDataURL();
+                link.click();
+                console.log('📥 Canvas PNG downloaded');
+            }).catch(error => {
+                console.error('❌ Canvas generation failed:', error);
+            });
+        }
+
+        async function testPDFGeneration() {
+            const element = document.getElementById('chart-container');
+            console.log('=== PDF Generation Test ===');
+            
+            try {
+                debugElement();
+                
+                console.log('🎨 Generating canvas...');
+                const canvas = await html2canvas(element, {
+                    scale: 2,
+                    backgroundColor: '#ffffff',
+                    logging: true,
+                    useCORS: true,
+                    allowTaint: true
+                });
+                
+                console.log('✅ Canvas ready:', canvas.width, 'x', canvas.height);
+                
+                if (canvas.width === 0 || canvas.height === 0) {
+                    throw new Error('Canvas has zero dimensions');
+                }
+                
+                console.log('📄 Creating PDF...');
+                const pdf = new jsPDF({
+                    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+                    unit: 'px',
+                    format: [canvas.width, canvas.height]
+                });
+                
+                const imgData = canvas.toDataURL('image/png', 0.95);
+                console.log('🖼️ Image data generated, length:', imgData.length);
+                
+                if (!imgData.startsWith('data:image/png')) {
+                    throw new Error('Invalid image data format');
+                }
+                
+                pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+                
+                console.log('💾 Saving PDF...');
+                pdf.save('test-graph-93626485-a770-466c-b9f7-7ce7c3efd733.pdf');
+                
+                console.log('✅ PDF generation completed successfully!');
+                
+                // Also log PDF info
+                const pdfBlob = pdf.output('blob');
+                console.log('📊 PDF file size:', pdfBlob.size, 'bytes');
+                
+            } catch (error) {
+                console.error('❌ PDF generation failed:', error);
+                console.error('Error stack:', error.stack);
+                alert('PDF generation failed: ' + error.message);
+            }
+        }
+
+        // Auto-run debug on load
+        setTimeout(() => {
+            console.log('=== Auto Debug Info ===');
+            debugElement();
+        }, 1000);
+    </script>
+</body>
+</html>

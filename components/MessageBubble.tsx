@@ -463,7 +463,7 @@ const MessageBubble = ({
                   description={chart.description}
                 />
               ) : (
-                <div className="relative">
+                <div key={`chart-wrapper-${chart.id}`} className="relative">
                   <ChatGraph
                     key={chart.id}
                     graphId={chart.id}
