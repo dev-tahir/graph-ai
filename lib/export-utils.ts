@@ -1,55 +1,233 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-// Helper function to create CSS overrides for modern color functions
-function createCompatibilityCSS(): string {
-  return `
-    * { 
-      color-scheme: none !important; 
-    }
-    /* Override Tailwind CSS colors that might use modern color functions */
-    .bg-blue-500 { background-color: rgb(59 130 246) !important; }
-    .bg-blue-600 { background-color: rgb(37 99 235) !important; }
-    .bg-red-500 { background-color: rgb(239 68 68) !important; }
-    .bg-green-500 { background-color: rgb(34 197 94) !important; }
-    .bg-yellow-500 { background-color: rgb(245 158 11) !important; }
-    .bg-purple-500 { background-color: rgb(139 92 246) !important; }
-    .bg-indigo-500 { background-color: rgb(99 102 241) !important; }
-    .bg-pink-500 { background-color: rgb(236 72 153) !important; }
-    .bg-gray-50 { background-color: rgb(249 250 251) !important; }
-    .bg-gray-100 { background-color: rgb(243 244 246) !important; }
-    .bg-gray-200 { background-color: rgb(229 231 235) !important; }
-    .bg-gray-300 { background-color: rgb(209 213 219) !important; }
-    .bg-gray-400 { background-color: rgb(156 163 175) !important; }
-    .bg-gray-500 { background-color: rgb(107 114 128) !important; }
-    .bg-gray-600 { background-color: rgb(75 85 99) !important; }
-    .bg-gray-700 { background-color: rgb(55 65 81) !important; }
-    .bg-gray-800 { background-color: rgb(31 41 55) !important; }
-    .bg-gray-900 { background-color: rgb(17 24 39) !important; }
-    .bg-white { background-color: rgb(255 255 255) !important; }
-    .text-gray-900 { color: rgb(17 24 39) !important; }
-    .text-gray-800 { color: rgb(31 41 55) !important; }
-    .text-gray-700 { color: rgb(55 65 81) !important; }
-    .text-gray-600 { color: rgb(75 85 99) !important; }
-    .text-gray-500 { color: rgb(107 114 128) !important; }
-    .text-gray-400 { color: rgb(156 163 175) !important; }
-    .text-blue-600 { color: rgb(37 99 235) !important; }
-    .text-blue-500 { color: rgb(59 130 246) !important; }
-    .text-red-600 { color: rgb(220 38 38) !important; }
-    .text-green-600 { color: rgb(22 163 74) !important; }
-    .text-white { color: rgb(255 255 255) !important; }
-    .border-gray-200 { border-color: rgb(229 231 235) !important; }
-    .border-gray-300 { border-color: rgb(209 213 219) !important; }
-    .border-blue-500 { border-color: rgb(59 130 246) !important; }
-  `;
+// -------------------------------------------------------------
+// Color Function Normalization
+// -------------------------------------------------------------
+
+const LAB_REGEX = /lab\(([^)]+)\)/gi;
+const LCH_REGEX = /lch\(([^)]+)\)/gi;
+const OKLCH_REGEX = /oklch\(([^)]+)\)/gi;
+const COLOR_FUNC_REGEX = /color\(([^)]+)\)/gi;
+
+interface RGB { r: number; g: number; b: number }
+
+function clamp(v: number, min = 0, max = 255): number { 
+  return Math.min(max, Math.max(min, v)); 
 }
 
-// Helper function to create onclone callback for html2canvas
-function createHtml2CanvasCloneCallback() {
-  return (clonedDoc: Document) => {
-    const style = clonedDoc.createElement('style');
-    style.textContent = createCompatibilityCSS();
-    clonedDoc.head.appendChild(style);
+function labToSRGB(l: number, a: number, b: number): RGB {
+  const y = (l + 16) / 116;
+  const x = a / 500 + y;
+  const z = y - b / 200;
+
+  const xyz = [x, y, z].map(v => {
+    const v3 = v ** 3;
+    return v3 > 0.008856 ? v3 : (v - 16 / 116) / 7.787;
+  });
+
+  const X = xyz[0] * 95.047;
+  const Y = xyz[1] * 100.0;
+  const Z = xyz[2] * 108.883;
+
+  let r = X * 0.032406 + Y * (-0.015372) + Z * (-0.004986);
+  let g = X * (-0.009689) + Y * 0.018758 + Z * 0.000415;
+  let b2 = X * 0.000557 + Y * (-0.002040) + Z * 0.010570;
+
+  const rgbLin = [r, g, b2].map(v => {
+    v /= 100;
+    return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+  });
+
+  return {
+    r: clamp(Math.round(rgbLin[0] * 255)),
+    g: clamp(Math.round(rgbLin[1] * 255)),
+    b: clamp(Math.round(rgbLin[2] * 255))
+  };
+}
+
+function lchToSRGB(l: number, c: number, h: number): RGB {
+  const hr = (h * Math.PI) / 180;
+  const a = c * Math.cos(hr);
+  const b = c * Math.sin(hr);
+  return labToSRGB(l, a, b);
+}
+
+function oklchToSRGB(l: number, c: number, h: number): RGB {
+  const labL = l * 100;
+  return lchToSRGB(labL, c * 100, h);
+}
+
+function parseNumberList(str: string): number[] {
+  return str.split(/[\s,/]+/).filter(Boolean).map(v => parseFloat(v));
+}
+
+function normalizeModernColors(styleValue: string): string {
+  if (!styleValue) return styleValue;
+
+  styleValue = styleValue.replace(LAB_REGEX, (_, inner) => {
+    const nums = parseNumberList(inner);
+    if (nums.length >= 3) {
+      const { r, g, b } = labToSRGB(nums[0], nums[1], nums[2]);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+    return 'rgb(0, 0, 0)';
+  });
+
+  styleValue = styleValue.replace(LCH_REGEX, (_, inner) => {
+    const nums = parseNumberList(inner);
+    if (nums.length >= 3) {
+      const { r, g, b } = lchToSRGB(nums[0], nums[1], nums[2]);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+    return 'rgb(0, 0, 0)';
+  });
+
+  styleValue = styleValue.replace(OKLCH_REGEX, (_, inner) => {
+    const nums = parseNumberList(inner);
+    if (nums.length >= 3) {
+      const { r, g, b } = oklchToSRGB(nums[0], nums[1], nums[2]);
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+    return 'rgb(0, 0, 0)';
+  });
+
+  styleValue = styleValue.replace(COLOR_FUNC_REGEX, () => 'rgb(31, 41, 55)');
+
+  return styleValue;
+}
+
+/**
+ * Create a completely isolated clone with all styles inlined and normalized
+ * Enhanced to handle canvas elements properly
+ */
+function createIsolatedClone(element: HTMLElement): HTMLElement {
+  console.log('🔧 Creating isolated clone...');
+  
+  // Deep clone the element
+  const clone = element.cloneNode(true) as HTMLElement;
+  
+  // Get all elements in both trees
+  const originals = [element, ...Array.from(element.querySelectorAll('*'))];
+  const clones = [clone, ...Array.from(clone.querySelectorAll('*'))];
+  
+  // Process each element
+  for (let i = 0; i < originals.length; i++) {
+    const original = originals[i];
+    const cloned = clones[i];
+    
+    if (!original || !cloned) continue;
+    
+    // **FIX: Handle canvas elements - copy their content**
+    if (original instanceof HTMLCanvasElement && cloned instanceof HTMLCanvasElement) {
+      const ctx = cloned.getContext('2d');
+      if (ctx) {
+        cloned.width = original.width;
+        cloned.height = original.height;
+        ctx.drawImage(original, 0, 0);
+      }
+    }
+    
+    // Get computed styles from original
+    const computed = window.getComputedStyle(original);
+    
+    // Critical properties to copy
+    const props = [
+      'color', 'background-color', 'background', 'background-image',
+      'border-color', 'border', 'border-top-color', 'border-right-color', 
+      'border-bottom-color', 'border-left-color',
+      'fill', 'stroke', 'stop-color',
+      'font-family', 'font-size', 'font-weight', 'line-height',
+      'width', 'height', 'padding', 'margin',
+      'display', 'position', 'top', 'left', 'right', 'bottom',
+      'opacity', 'transform'
+    ];
+    
+    // Build inline style string
+    let inlineStyle = '';
+    props.forEach(prop => {
+      let value = computed.getPropertyValue(prop);
+      if (value && value !== 'none' && value !== 'auto' && value !== 'normal') {
+        // Normalize colors
+        value = normalizeModernColors(value);
+        inlineStyle += `${prop}: ${value} !important; `;
+      }
+    });
+    
+    // Force no animations
+    inlineStyle += 'animation: none !important; transition: none !important;';
+    
+    if (cloned instanceof HTMLElement) {
+      cloned.setAttribute('style', inlineStyle);
+    }
+    
+    // Handle SVG attributes
+    if (original instanceof SVGElement && cloned instanceof SVGElement) {
+      const svgAttrs = ['fill', 'stroke', 'stop-color', 'flood-color'];
+      svgAttrs.forEach(attr => {
+        let value = original.getAttribute(attr);
+        if (value) {
+          value = normalizeModernColors(value);
+          cloned.setAttribute(attr, value);
+        }
+      });
+    }
+  }
+  
+  console.log('✅ Isolated clone created');
+  return clone;
+}
+
+/**
+ * Create an isolated container for rendering
+ */
+function createIsolatedContainer(element: HTMLElement): { container: HTMLElement; cleanup: () => void } {
+  console.log('📦 Creating isolated container...');
+  
+  // Create container with clean styles
+  const container = document.createElement('div');
+  container.style.cssText = `
+    position: fixed;
+    top: -10000px;
+    left: -10000px;
+    width: ${element.offsetWidth}px;
+    height: ${element.offsetHeight}px;
+    background: rgb(255, 255, 255) !important;
+    z-index: -1;
+    isolation: isolate;
+  `;
+  
+  // Add clean stylesheet to container
+  const style = document.createElement('style');
+  style.textContent = `
+    * {
+      color: rgb(31, 41, 55) !important;
+      border-color: rgb(229, 231, 235) !important;
+    }
+    svg, path, circle, rect, line, polyline, polygon {
+      fill: rgb(59, 130, 246) !important;
+      stroke: rgb(59, 130, 246) !important;
+    }
+  `;
+  container.appendChild(style);
+  
+  // Clone the element with all styles inlined
+  const clone = createIsolatedClone(element);
+  container.appendChild(clone);
+  
+  // Append to body
+  document.body.appendChild(container);
+  
+  console.log('✅ Container created and appended');
+  
+  // Return cleanup function
+  return {
+    container: clone,
+    cleanup: () => {
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+    }
   };
 }
 
@@ -67,235 +245,305 @@ export interface BulkExportOptions {
 }
 
 /**
- * Prepare element for screenshot by fixing common positioning issues
- */
-function prepareElementForScreenshot(element: HTMLElement): () => void {
-  const elementsToRestore: Array<{ element: HTMLElement; styles: Record<string, string> }> = [];
-
-  // Helper to save and modify styles
-  const saveAndModifyStyle = (el: HTMLElement, styles: Record<string, string>) => {
-    const original: Record<string, string> = {};
-    Object.keys(styles).forEach(prop => {
-      original[prop] = el.style.getPropertyValue(prop);
-      el.style.setProperty(prop, styles[prop]);
-    });
-    elementsToRestore.push({ element: el, styles: original });
-  };
-
-  // Fix the target element
-  saveAndModifyStyle(element, {
-    'position': 'relative',
-    'z-index': '1',
-    'transform': 'none',
-    'filter': 'none'
-  });
-
-  // Fix parent containers that might cause issues
-  let parent = element.parentElement;
-  while (parent && parent !== document.body) {
-    const computed = window.getComputedStyle(parent);
-    if (computed.transform !== 'none' || computed.position === 'fixed') {
-      saveAndModifyStyle(parent, {
-        'transform': 'none',
-        'position': 'static'
-      });
-    }
-    parent = parent.parentElement;
-  }
-
-  // Return cleanup function
-  return () => {
-    elementsToRestore.forEach(({ element, styles }) => {
-      Object.keys(styles).forEach(prop => {
-        if (styles[prop]) {
-          element.style.setProperty(prop, styles[prop]);
-        } else {
-          element.style.removeProperty(prop);
-        }
-      });
-    });
-  };
-}
-
-/**
- * Capture a screenshot of a DOM element with improved positioning
+ * Main capture function using isolated rendering
+ * **IMPORTANT: Pass ONLY the chart element, not the container with buttons!**
  */
 export async function captureScreenshot(
   element: HTMLElement,
   options: ExportOptions = { format: 'png' }
 ): Promise<string | null> {
-  let restoreStyles: (() => void) | null = null;
+  let cleanup: (() => void) | null = null;
   
   try {
-    // Wait for any pending renders (especially important for charts)
-    await new Promise(resolve => setTimeout(resolve, 100));
+    console.log('🎯 Starting screenshot capture with isolated rendering...');
     
-    // Ensure element is visible and properly positioned
-    const elementRect = element.getBoundingClientRect();
-    const isElementVisible = elementRect.width > 0 && elementRect.height > 0;
-    
-    if (!isElementVisible) {
-      throw new Error('Element is not visible or has no dimensions');
+    // Verify element is visible
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      throw new Error('Element has zero dimensions');
     }
-
-    // Prepare element for screenshot (fix positioning issues)
-    restoreStyles = prepareElementForScreenshot(element);
-
-    // Scroll element into view if needed
-    element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     
-    // Wait for scroll to complete and styles to be applied
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Recalculate rect after style changes
-    const updatedRect = element.getBoundingClientRect();
-
-    // Store current scroll positions
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-
-    const canvas = await html2canvas(element, {
+    console.log('Element size:', rect.width, 'x', rect.height);
+    
+    // **REMOVED: Don't wait before cloning - we need to clone immediately**
+    // await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Create isolated clone
+    const { container, cleanup: cleanupFn } = createIsolatedContainer(element);
+    cleanup = cleanupFn;
+    
+    // **INCREASED: Give more time for charts to settle**
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    console.log('📸 Capturing isolated container...');
+    
+    // Capture with minimal options
+    const canvas = await html2canvas(container, {
       scale: options.scale || 2,
       backgroundColor: '#ffffff',
       logging: false,
       useCORS: true,
       allowTaint: true,
-      // Fix positioning issues - use absolute positioning
-      x: Math.max(0, updatedRect.left + scrollX),
-      y: Math.max(0, updatedRect.top + scrollY),
-      width: Math.ceil(updatedRect.width),
-      height: Math.ceil(updatedRect.height),
-      // Scroll position handling
-      scrollX: scrollX,
-      scrollY: scrollY,
-      windowWidth: window.innerWidth,
-      windowHeight: window.innerHeight,
-      // Use foreignObjectRendering to handle modern CSS better
-      foreignObjectRendering: true,
-      // Ignore elements that might cause issues
-      ignoreElements: (element) => {
-        const htmlEl = element as HTMLElement;
-        return element.tagName === 'IFRAME' || 
-               element.classList?.contains('ignore-export') ||
-               htmlEl.style?.position === 'fixed';
-      },
-      // Add onclone callback to fix modern CSS color function issues
-      onclone: (clonedDoc: Document) => {
-        const style = clonedDoc.createElement('style');
-        style.textContent = createCompatibilityCSS();
-        clonedDoc.head.appendChild(style);
-        
-        // Fix positioning in cloned document
-        const clonedElement = clonedDoc.documentElement;
-        clonedElement.style.transform = 'none';
-        clonedElement.style.transformOrigin = 'top left';
-        
-        // Ensure all child elements have proper positioning
-        const allElements = clonedDoc.querySelectorAll('*');
-        allElements.forEach((el: Element) => {
-          const htmlEl = el as HTMLElement;
-          if (htmlEl.style) {
-            // Remove transforms that might interfere
-            if (htmlEl.style.transform && htmlEl.style.transform !== 'none') {
-              htmlEl.style.transform = 'none';
-            }
-            // Fix sticky/fixed positioning
-            if (htmlEl.style.position === 'sticky' || htmlEl.style.position === 'fixed') {
-              htmlEl.style.position = 'relative';
-            }
-          }
-        });
-      },
+      foreignObjectRendering: false,
     });
-
-    if (options.format === 'pdf') {
-      return canvasToPDF(canvas, options.filename);
+    
+    console.log('✅ Canvas created:', canvas.width, 'x', canvas.height);
+    
+    // Cleanup immediately
+    cleanup();
+    cleanup = null;
+    
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw new Error('Canvas has zero dimensions');
     }
 
-    const dataUrl = canvas.toDataURL(
-      `image/${options.format}`,
-      options.quality || 0.95
-    );
+    // Handle PDF
+    if (options.format === 'pdf') {
+      console.log('📄 Creating PDF...');
+      
+      const pdf = new jsPDF({
+        orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+        unit: 'px',
+        format: [canvas.width, canvas.height]
+      });
+      
+      const imgData = canvas.toDataURL('image/png', options.quality || 0.95);
+      
+      if (!imgData || !imgData.startsWith('data:image/png')) {
+        throw new Error('Invalid image data');
+      }
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      
+      if (options.filename) {
+        pdf.save(options.filename);
+        console.log('✅ PDF saved:', options.filename);
+      }
+      
+      return imgData;
+    }
+
+    // Handle image
+    const mimeType = options.format === 'jpg' ? 'image/jpeg' : 'image/png';
+    const dataUrl = canvas.toDataURL(mimeType, options.quality || 0.95);
+
+    if (!dataUrl || dataUrl === 'data:,') {
+      throw new Error('Invalid data URL');
+    }
 
     if (options.filename) {
       downloadDataUrl(dataUrl, options.filename);
+      console.log('✅ Image saved:', options.filename);
     }
 
     return dataUrl;
+    
   } catch (error) {
-    console.error('Screenshot capture failed:', error);
+    console.error('❌ Screenshot failed:', error);
+    
+    if (error instanceof Error) {
+      console.error('Message:', error.message);
+      console.error('Stack:', error.stack);
+    }
+    
     return null;
+    
   } finally {
-    // Restore original styles
-    if (restoreStyles) {
-      restoreStyles();
+    // Ensure cleanup always runs
+    if (cleanup) {
+      try {
+        cleanup();
+      } catch (e) {
+        console.warn('Cleanup error:', e);
+      }
     }
   }
 }
 
 /**
- * Specialized function for capturing chart elements with better positioning
+ * Chart-specific capture
  */
 export async function captureChartScreenshot(
   chartElement: HTMLElement,
   options: ExportOptions = { format: 'png' }
 ): Promise<string | null> {
-  try {
-    // Wait for chart animations to complete
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    // Find the actual chart canvas if it exists (for Chart.js charts)
-    const canvas = chartElement.querySelector('canvas');
-    if (canvas && canvas.width > 0 && canvas.height > 0) {
-      // If it's a Chart.js canvas, we can export directly
-      const dataUrl = canvas.toDataURL(`image/${options.format}`, options.quality || 0.95);
+  console.log('📊 Capturing chart...');
+  return await captureScreenshot(chartElement, options);
+}
+
+/**
+ * Bulk export
+ */
+export async function bulkExportGraphs(
+  elements: { element: HTMLElement; title: string }[],
+  options: BulkExportOptions
+): Promise<void> {
+  if (elements.length === 0) {
+    throw new Error('No elements to export');
+  }
+
+  console.log(`📦 Bulk exporting ${elements.length} graphs...`);
+
+  if (options.format === 'pdf') {
+    let pdf: jsPDF | null = null;
+
+    for (let i = 0; i < elements.length; i++) {
+      const { element, title } = elements[i];
       
-      if (options.filename) {
-        downloadDataUrl(dataUrl, options.filename);
+      try {
+        console.log(`Processing ${i + 1}/${elements.length}: ${title}`);
+        
+        const dataUrl = await captureScreenshot(element, { format: 'png' });
+        
+        if (!dataUrl) {
+          console.warn(`Skipping "${title}" - capture failed`);
+          continue;
+        }
+
+        if (!pdf) {
+          pdf = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: 'a4'
+          });
+        } else {
+          pdf.addPage();
+        }
+
+        if (options.includeTitle) {
+          pdf.setFontSize(16);
+          pdf.text(title, 20, 20);
+        }
+
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = dataUrl;
+        });
+        
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const titleHeight = options.includeTitle ? 30 : 20;
+        const availableHeight = pageHeight - titleHeight - 20;
+        
+        const maxWidth = pageWidth - 40;
+        const aspectRatio = img.width / img.height;
+        
+        let finalWidth = maxWidth;
+        let finalHeight = maxWidth / aspectRatio;
+        
+        if (finalHeight > availableHeight) {
+          finalHeight = availableHeight;
+          finalWidth = finalHeight * aspectRatio;
+        }
+        
+        if (finalWidth > 0 && finalHeight > 0) {
+          pdf.addImage(dataUrl, 'PNG', 20, titleHeight, finalWidth, finalHeight);
+        }
+        
+        console.log(`✅ Added "${title}"`);
+      } catch (error) {
+        console.error(`❌ Failed "${title}":`, error);
       }
-      
-      return dataUrl;
     }
 
-    // For SVG charts or complex HTML charts, use html2canvas with special handling
-    return await captureScreenshot(chartElement, {
-      ...options,
-      scale: options.scale || 1.5 // Slightly lower scale for better performance on charts
-    });
-  } catch (error) {
-    console.error('Chart screenshot capture failed:', error);
-    return null;
+    if (pdf && options.filename) {
+      pdf.save(options.filename);
+      console.log('✅ PDF saved!');
+    } else if (!pdf) {
+      throw new Error('No valid elements exported');
+    }
+  } else {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+
+    for (const { element, title } of elements) {
+      try {
+        const dataUrl = await captureScreenshot(element, { format: 'png' });
+        
+        if (dataUrl) {
+          const base64Data = dataUrl.split(',')[1];
+          const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+          zip.file(`${sanitizedTitle}.png`, base64Data, { base64: true });
+          console.log(`✅ Added "${title}"`);
+        }
+      } catch (error) {
+        console.error(`❌ Failed "${title}":`, error);
+      }
+    }
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = options.filename || 'graphs.zip';
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    console.log('✅ ZIP downloaded!');
   }
 }
 
-// Helper functions
-async function canvasToPDF(canvas: HTMLCanvasElement, filename?: string): Promise<string> {
-  const pdf = new jsPDF({
-    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
-    unit: 'px',
-    format: [canvas.width, canvas.height],
-  });
+/**
+ * Dashboard export
+ */
+export async function exportDashboardToPDF(
+  dashboardElement: HTMLElement,
+  title: string,
+  filename: string
+): Promise<void> {
+  try {
+    console.log('📄 Exporting dashboard...');
+    
+    const dataUrl = await captureScreenshot(dashboardElement, {
+      format: 'png',
+      scale: 1.5
+    });
+    
+    if (!dataUrl) {
+      throw new Error('Failed to capture dashboard');
+    }
 
-  const imgData = canvas.toDataURL('image/png');
-  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
 
-  if (filename) {
+    const pdf = new jsPDF({
+      orientation: img.width > img.height ? 'landscape' : 'portrait',
+      unit: 'px',
+      format: [img.width + 100, img.height + 100]
+    });
+
+    pdf.setFontSize(24);
+    pdf.text(title, 50, 40);
+    
+    pdf.setFontSize(12);
+    pdf.text(`Generated on ${new Date().toLocaleString()}`, 50, 60);
+
+    pdf.addImage(dataUrl, 'PNG', 50, 80, img.width, img.height);
+    
     pdf.save(filename);
+    console.log('✅ Dashboard saved!');
+    
+  } catch (error) {
+    console.error('❌ Dashboard export failed:', error);
+    throw error;
   }
-
-  return imgData;
 }
 
 function downloadDataUrl(dataUrl: string, filename: string): void {
   const link = document.createElement('a');
   link.href = dataUrl;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
 }
 
-/**
- * Get optimal export settings based on content
- */
 export function getOptimalExportSettings(element: HTMLElement): ExportOptions {
   const rect = element.getBoundingClientRect();
   const isLarge = rect.width > 1200 || rect.height > 800;
@@ -307,9 +555,6 @@ export function getOptimalExportSettings(element: HTMLElement): ExportOptions {
   };
 }
 
-/**
- * Export data as CSV
- */
 export function exportDataAsCSV(data: any[], filename: string): void {
   if (data.length === 0) return;
 
@@ -318,7 +563,6 @@ export function exportDataAsCSV(data: any[], filename: string): void {
     headers.join(','),
     ...data.map(row => headers.map(header => {
       const value = row[header];
-      // Escape commas and quotes in values
       if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
         return `"${value.replace(/"/g, '""')}"`;
       }
@@ -335,9 +579,6 @@ export function exportDataAsCSV(data: any[], filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Export data as Excel
- */
 export async function exportDataAsExcel(
   data: any[], 
   filename: string,
@@ -352,211 +593,37 @@ export async function exportDataAsExcel(
   XLSX.writeFile(workbook, filename);
 }
 
-/**
- * Bulk export multiple graphs
- */
-export async function bulkExportGraphs(
-  elements: { element: HTMLElement; title: string }[],
-  options: BulkExportOptions
-): Promise<void> {
-  if (elements.length === 0) {
-    throw new Error('No elements to export');
-  }
-
-  if (options.format === 'pdf') {
-    // Export as single PDF
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    for (let i = 0; i < elements.length; i++) {
-      const { element, title } = elements[i];
-      
-      if (i > 0) {
-        pdf.addPage();
-      }
-
-      // Add title if requested
-      if (options.includeTitle) {
-        pdf.setFontSize(16);
-        pdf.text(title, 20, 20);
-      }
-
-      try {
-        // Wait for element to be ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const canvas = await html2canvas(element, {
-          scale: 2,
-          backgroundColor: '#ffffff',
-          logging: false,
-          useCORS: true,
-          allowTaint: true,
-          foreignObjectRendering: true,
-          onclone: createHtml2CanvasCloneCallback()
-        });
-
-        const imgData = canvas.toDataURL('image/png', 0.95);
-        
-        // Calculate dimensions to fit on page
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        const titleHeight = options.includeTitle ? 30 : 20;
-        const availableHeight = pageHeight - titleHeight - 20;
-        
-        const imgWidth = pageWidth - 40;
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        
-        // Scale down if image is too tall
-        const finalHeight = Math.min(imgHeight, availableHeight);
-        const finalWidth = (canvas.width * finalHeight) / canvas.height;
-        
-        pdf.addImage(imgData, 'PNG', 20, titleHeight, finalWidth, finalHeight);
-      } catch (error) {
-        console.error(`Failed to export graph "${title}":`, error);
-        // Add error message to PDF
-        pdf.setFontSize(12);
-        const errorY = options.includeTitle ? 50 : 30;
-        pdf.text(`Failed to export: ${title}`, 20, errorY);
-      }
-    }
-
-    if (options.filename) {
-      pdf.save(options.filename);
-    }
-  } else {
-    // Export as ZIP of PNG images
-    const JSZip = (await import('jszip')).default;
-    const zip = new JSZip();
-
-    for (const { element, title } of elements) {
-      try {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const canvas = await html2canvas(element, {
-          scale: 2,
-          backgroundColor: '#ffffff',
-          logging: false,
-          useCORS: true,
-          allowTaint: true,
-          foreignObjectRendering: true,
-          onclone: createHtml2CanvasCloneCallback()
-        });
-
-        const dataUrl = canvas.toDataURL('image/png', 0.95);
-        const base64Data = dataUrl.split(',')[1];
-        
-        const sanitizedTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        zip.file(`${sanitizedTitle}.png`, base64Data, { base64: true });
-      } catch (error) {
-        console.error(`Failed to export graph "${title}":`, error);
-      }
-    }
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = options.filename || 'graphs.zip';
-    link.click();
-    URL.revokeObjectURL(url);
-  }
+export function debugPDFExport(element: HTMLElement): void {
+  console.group('📊 Debug');
+  
+  const rect = element.getBoundingClientRect();
+  console.log('Dimensions:', rect.width, 'x', rect.height);
+  
+  const styles = window.getComputedStyle(element);
+  const hasModern = (s: string) => /lab\(|lch\(|oklch\(|color\(/.test(s);
+  
+  console.log('Modern colors:', {
+    bg: hasModern(styles.backgroundColor),
+    color: hasModern(styles.color)
+  });
+  
+  console.groupEnd();
 }
 
-/**
- * Export dashboard as PDF
- */
-export async function exportDashboardToPDF(
-  dashboardElement: HTMLElement,
-  title: string,
-  filename: string
-): Promise<void> {
+export async function testExportWithLogging(element: HTMLElement, title: string = 'test'): Promise<void> {
+  console.group('🧪 Test');
+  debugPDFExport(element);
+  
   try {
-    // Wait for dashboard to be ready
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    const canvas = await html2canvas(dashboardElement, {
-      scale: 1.5,
-      backgroundColor: '#ffffff',
-      logging: false,
-      useCORS: true,
-      allowTaint: true,
-      foreignObjectRendering: true,
-      onclone: createHtml2CanvasCloneCallback(),
-      // Capture larger dashboard
-      width: dashboardElement.scrollWidth,
-      height: dashboardElement.scrollHeight
+    const result = await captureScreenshot(element, {
+      format: 'png',
+      filename: `${title}_test.png`
     });
-
-    const pdf = new jsPDF({
-      orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    // Add title
-    pdf.setFontSize(18);
-    pdf.text(title, 20, 20);
     
-    // Add timestamp
-    pdf.setFontSize(10);
-    pdf.text(`Generated on ${new Date().toLocaleString()}`, 20, 30);
-
-    const imgData = canvas.toDataURL('image/png', 0.95);
-    
-    // Calculate dimensions
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const availableHeight = pageHeight - 50; // Space for title and margins
-    
-    const imgWidth = pageWidth - 40;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    
-    if (imgHeight <= availableHeight) {
-      // Fits on one page
-      pdf.addImage(imgData, 'PNG', 20, 40, imgWidth, imgHeight);
-    } else {
-      // Need to split across pages
-      const pagesNeeded = Math.ceil(imgHeight / availableHeight);
-      
-      for (let page = 0; page < pagesNeeded; page++) {
-        if (page > 0) {
-          pdf.addPage();
-        }
-        
-        const yOffset = page * availableHeight;
-        const sourceY = (yOffset / imgHeight) * canvas.height;
-        const sourceHeight = Math.min(
-          (availableHeight / imgHeight) * canvas.height,
-          canvas.height - sourceY
-        );
-        
-        // Create a temporary canvas for this page slice
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = sourceHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        
-        if (tempCtx) {
-          tempCtx.drawImage(
-            canvas,
-            0, sourceY, canvas.width, sourceHeight,
-            0, 0, canvas.width, sourceHeight
-          );
-          
-          const tempImgData = tempCanvas.toDataURL('image/png', 0.95);
-          const sliceHeight = (sourceHeight * imgWidth) / canvas.width;
-          
-          pdf.addImage(tempImgData, 'PNG', 20, page === 0 ? 40 : 20, imgWidth, sliceHeight);
-        }
-      }
-    }
-
-    pdf.save(filename);
+    console.log(result ? '✅ Success' : '❌ Failed');
   } catch (error) {
-    console.error('Dashboard export failed:', error);
-    throw new Error(`Failed to export dashboard: ${error}`);
+    console.error('❌ Error:', error);
   }
+  
+  console.groupEnd();
 }
