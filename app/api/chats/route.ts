@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
+import { getCurrentUserId, isGuestUserId } from '@/lib/guest-user';
 
 // Validation schemas
 const CreateChatSchema = z.object({
@@ -18,9 +19,15 @@ const UpdateChatSchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const session = await auth();
+    const userId = getCurrentUserId(session);
+    const isGuest = isGuestUserId(userId);
     
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Guests cannot access this endpoint (no persistent storage)
+    if (isGuest) {
+      return NextResponse.json({ 
+        chats: [], 
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } 
+      });
     }
 
     const { searchParams } = new URL(request.url);
@@ -31,7 +38,7 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     const where: any = {
-      userId: session.user.id,
+      userId: userId,
     };
 
     if (search) {
@@ -81,9 +88,14 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await auth();
+    const userId = getCurrentUserId(session);
+    const isGuest = isGuestUserId(userId);
     
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Guests cannot create persistent chats
+    if (isGuest) {
+      return NextResponse.json({ 
+        error: 'Guests cannot create persistent chats. Sign up to save your conversations.' 
+      }, { status: 401 });
     }
 
     const body = await request.json();
@@ -92,7 +104,7 @@ export async function POST(request: NextRequest) {
     const chat = await prisma.chat.create({
       data: {
         ...validatedData,
-        userId: session.user.id,
+        userId: userId,
         title: validatedData.title || `Chat ${new Date().toLocaleDateString()}`,
       },
       include: {

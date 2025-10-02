@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { useSession } from 'next-auth/react';
 import { nanoid } from 'nanoid';
 import { localStorageManager } from '@/lib/local-storage';
+import { getCurrentUserId } from '@/lib/guest-user';
 import type { StoredMessage, StoredChat, StoredFile } from '@/lib/local-storage';
 
 interface ParsedChart {
@@ -49,6 +51,7 @@ export function useChatWithFiles({
   initialMessages = [],
   onError
 }: UseChatWithFilesProps = {}) {
+  const { data: session } = useSession();
   const [messages, setMessages] = useState<StoredMessage[]>(initialMessages);
   const [uploadedFiles, setUploadedFiles] = useState<StoredFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -56,6 +59,73 @@ export function useChatWithFiles({
   const [error, setError] = useState<Error | null>(null);
   const currentChatId = useRef(chatId || nanoid());
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Load chat messages when chatId changes
+  useEffect(() => {
+    if (chatId && chatId !== currentChatId.current) {
+      currentChatId.current = chatId;
+      
+      // Load messages from local storage
+      const chat = localStorageManager.getChat(chatId);
+      if (chat) {
+        setMessages(chat.messages || []);
+      } else {
+        // If not in local storage, try to load from API (for authenticated users)
+        if (session?.user) {
+          loadChatFromAPI(chatId);
+        } else {
+          // New chat for guest user
+          setMessages([]);
+        }
+      }
+      
+      // Reset uploaded files for new chat
+      setUploadedFiles([]);
+    } else if (!chatId) {
+      // New chat
+      currentChatId.current = nanoid();
+      setMessages([]);
+      setUploadedFiles([]);
+    }
+  }, [chatId, session]);
+
+  const loadChatFromAPI = async (chatIdToLoad: string) => {
+    try {
+      const response = await fetch(`/api/chats/${chatIdToLoad}`);
+      if (response.ok) {
+        const chatData = await response.json();
+        const apiMessages = chatData.messages?.map((msg: any) => ({
+          id: msg.id,
+          content: msg.content,
+          role: msg.role.toLowerCase(),
+          createdAt: msg.createdAt,
+          isEdited: msg.isEdited,
+          editedAt: msg.editedAt,
+          parentId: msg.parentId,
+          files: msg.files,
+          graphs: msg.graphs,
+        })) || [];
+        
+        setMessages(apiMessages);
+        
+        // Save to local storage for future use
+        const storedChat = {
+          id: chatIdToLoad,
+          title: chatData.title || 'Untitled Chat',
+          messages: apiMessages,
+          createdAt: chatData.createdAt,
+          updatedAt: chatData.updatedAt,
+        };
+        localStorageManager.saveChat(storedChat);
+      } else {
+        console.warn(`Chat ${chatIdToLoad} not found in API`);
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Failed to load chat from API:', error);
+      setMessages([]);
+    }
+  };
 
   const uploadFiles = useCallback(async (files: File[]): Promise<StoredFile[]> => {
     setIsUploading(true);
@@ -151,6 +221,9 @@ export function useChatWithFiles({
       // Create abort controller for streaming
       abortControllerRef.current = new AbortController();
 
+      // Get current user ID (authenticated or guest)
+      const userId = getCurrentUserId(session);
+
       // Send to AI API
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -162,6 +235,7 @@ export function useChatWithFiles({
             role: msg.role,
           })),
           chatId: currentChatId.current,
+          userId: userId,
           fileData: uploadedFiles.map(file => ({
             originalName: file.originalName,
             type: file.data?.type,

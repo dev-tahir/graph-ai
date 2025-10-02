@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 import { 
@@ -11,21 +11,110 @@ import {
   FileText,
   ChevronDown,
   LogIn,
-  UserPlus
+  UserPlus,
+  UserCheck
 } from 'lucide-react';
+import { createGuestUser, getOrCreateGuestUserId, type GuestUser } from '@/lib/guest-user';
 
 export default function UserMenu() {
   const { data: session, status } = useSession();
   const [isOpen, setIsOpen] = useState(false);
+  const [guestUser, setGuestUser] = useState<GuestUser | null>(null);
 
   const handleSignOut = async () => {
     await signOut({ callbackUrl: '/' });
   };
 
+  // Set up guest user if not authenticated
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      const guestId = getOrCreateGuestUserId();
+      setGuestUser(createGuestUser(guestId));
+    } else {
+      setGuestUser(null);
+    }
+  }, [status]);
+
   if (status === 'loading') {
     return (
       <div className="animate-pulse">
         <div className="h-8 w-8 bg-gray-300 rounded-full"></div>
+      </div>
+    );
+  }
+
+  if (!session && guestUser) {
+    return (
+      <div className="flex items-center space-x-3">
+        {/* Guest user indicator */}
+        <div className="relative">
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <div className="h-8 w-8 bg-gray-400 rounded-full flex items-center justify-center">
+              <UserCheck className="h-4 w-4 text-white" />
+            </div>
+            <div className="hidden md:block text-left">
+              <div className="text-sm font-medium text-gray-900">
+                {guestUser.name}
+              </div>
+              <div className="text-xs text-gray-500">
+                Guest Mode
+              </div>
+            </div>
+            <ChevronDown className={`h-4 w-4 text-gray-500 transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Guest Dropdown Menu */}
+          {isOpen && (
+            <>
+              {/* Backdrop */}
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setIsOpen(false)}
+              />
+              
+              {/* Menu */}
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+                <div className="p-3 border-b border-gray-100">
+                  <div className="text-sm font-medium text-gray-900">
+                    {guestUser.name}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    You're using Graph AI as a guest
+                  </div>
+                </div>
+                
+                <div className="p-2">
+                  <div className="mb-3 p-3 bg-blue-50 rounded-md">
+                    <p className="text-xs text-blue-800 mb-2">
+                      💡 Sign up to save your chats and graphs permanently!
+                    </p>
+                  </div>
+                  
+                  <Link
+                    href="/auth/signin"
+                    className="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <LogIn className="h-4 w-4 mr-3" />
+                    Sign In
+                  </Link>
+                  
+                  <Link
+                    href="/auth/signup"
+                    className="flex items-center w-full px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md font-medium"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <UserPlus className="h-4 w-4 mr-3" />
+                    Create Account
+                  </Link>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     );
   }

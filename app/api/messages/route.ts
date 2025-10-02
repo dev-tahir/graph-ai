@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { z } from 'zod';
+import { getCurrentUserId, isGuestUserId } from '@/lib/guest-user';
 
 const CreateMessageSchema = z.object({
   content: z.string().min(1),
@@ -18,9 +19,14 @@ const UpdateMessageSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const session = await auth();
+    const userId = getCurrentUserId(session);
+    const isGuest = isGuestUserId(userId);
     
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Guests cannot create persistent messages
+    if (isGuest) {
+      return NextResponse.json({ 
+        error: 'Guests cannot create persistent messages. Sign up to save your conversations.' 
+      }, { status: 401 });
     }
 
     const body = await request.json();
@@ -35,7 +41,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Chat not found' }, { status: 404 });
     }
 
-    if (chat.userId !== session.user.id) {
+    if (chat.userId !== userId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
@@ -56,7 +62,7 @@ export async function POST(request: NextRequest) {
     const message = await prisma.message.create({
       data: {
         ...validatedData,
-        userId: session.user.id,
+        userId: userId,
       },
       include: {
         user: {

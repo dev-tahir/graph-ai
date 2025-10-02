@@ -1,6 +1,9 @@
-import NextAuth from "next-auth";
+import NextAuth, { NextAuthOptions } from "next-auth";
+import { getServerSession } from "next-auth/next";
+import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { createGuestUser, type GuestUser } from "@/lib/guest-user";
 
 // Extend the built-in session types
 declare module "next-auth" {
@@ -10,6 +13,7 @@ declare module "next-auth" {
       email: string;
       name?: string | null;
       image?: string | null;
+      isGuest?: boolean;
     };
   }
   
@@ -18,16 +22,38 @@ declare module "next-auth" {
     email: string;
     name?: string | null;
     image?: string | null;
+    isGuest?: boolean;
   }
 }
 
-export const {
-  handlers: { GET, POST },
-  auth,
-  signIn,
-  signOut,
-} = NextAuth({
-  providers: [],
+export interface ExtendedSession {
+  user: {
+    id: string;
+    email?: string;
+    name?: string | null;
+    image?: string | null;
+    isGuest: boolean;
+  } | null;
+}
+
+export const authOptions: NextAuthOptions = {
+  providers: [
+    CredentialsProvider({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        // For now, return null to disable authentication
+        // This allows us to test the configuration without database issues
+        console.log("Auth attempt:", credentials?.email);
+        return null;
+      }
+    })
+  ],
+  
+  secret: process.env.NEXTAUTH_SECRET,
   
   session: {
     strategy: "jwt",
@@ -45,6 +71,7 @@ export const {
     async session({ session, token }) {
       if (token && session.user) {
         session.user.id = token.id as string;
+        session.user.isGuest = false; // Authenticated users are not guests
       }
       return session;
     },
@@ -56,7 +83,16 @@ export const {
   },
 
   debug: false, // Disable debug to reduce console errors
-});
+};
+
+// Create NextAuth instance
+const handler = NextAuth(authOptions);
+
+// Export for API routes (NextAuth v4 style)
+export { handler as GET, handler as POST };
+
+// Export auth function (NextAuth v4 compatible)
+export const auth = () => getServerSession(authOptions);
 
 // User registration function (disabled due to schema issues)
 export async function registerUser(email: string, password: string, name: string) {
@@ -109,4 +145,23 @@ export function validatePassword(password: string): { valid: boolean; errors: st
 export function validateEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
+}
+
+// Get an extended session that includes guest user support
+export async function getExtendedSession(): Promise<ExtendedSession> {
+  const session = await auth();
+  
+  if (session?.user) {
+    return {
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.name,
+        image: session.user.image,
+        isGuest: false,
+      }
+    };
+  }
+  
+  return { user: null };
 }

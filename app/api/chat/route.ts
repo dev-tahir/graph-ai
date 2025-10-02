@@ -3,14 +3,23 @@ import { streamText } from 'ai';
 import { google } from '@ai-sdk/google';
 import { prisma } from '@/lib/prisma';
 import { processFile } from '@/lib/file-processing';
+import { auth } from '@/lib/auth';
+import { getCurrentUserId, isGuestUserId } from '@/lib/guest-user';
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, chatId, fileData, userId } = await req.json();
+    const { messages, chatId, fileData, userId: providedUserId } = await req.json();
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: 'Messages are required' }, { status: 400 });
     }
+
+    // Get session for authenticated users
+    const session = await auth();
+    
+    // Determine user ID - use authenticated user ID or guest user ID
+    const userId = getCurrentUserId(session);
+    const isGuest = isGuestUserId(userId);
 
     const lastMessage = messages[messages.length - 1];
     
@@ -106,7 +115,8 @@ Always include complete Chart.js configuration with proper styling, colors, and 
       async onFinish({ text, finishReason, usage }) {
         try {
           // Save the conversation to database if chatId is provided
-          if (chatId) {
+          // Only save to database for authenticated users, not for guests
+          if (chatId && !isGuest) {
             // Save user message
             await prisma.message.create({
               data: {
@@ -114,7 +124,7 @@ Always include complete Chart.js configuration with proper styling, colors, and 
                 content: lastMessage.content,
                 role: 'USER',
                 chatId,
-                userId: userId || null,
+                userId: userId,
               },
             });
 
@@ -124,7 +134,7 @@ Always include complete Chart.js configuration with proper styling, colors, and 
                 content: text,
                 role: 'ASSISTANT',
                 chatId,
-                userId: userId || null,
+                userId: userId,
               },
             });
           }

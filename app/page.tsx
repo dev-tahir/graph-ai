@@ -1,11 +1,18 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useChatWithFiles } from '@/hooks/useChatWithFiles';
-import { ChatContainer } from '@/components';
+import { ChatContainer, ChatSidebar } from '@/components';
 import UserMenu from '@/components/UserMenu';
 import type { Message } from '@/components';
 
 export default function Home() {
+  const searchParams = useSearchParams();
+  const [currentChatId, setCurrentChatId] = useState<string | undefined>(
+    searchParams.get('chat') || undefined
+  );
+
   const {
     messages,
     sendMessage,
@@ -14,10 +21,34 @@ export default function Home() {
     isLoading,
     error,
     chatId
-  } = useChatWithFiles();
+  } = useChatWithFiles({ chatId: currentChatId });
+
+  // Update current chat ID when URL changes
+  useEffect(() => {
+    const urlChatId = searchParams.get('chat');
+    if (urlChatId && urlChatId !== currentChatId) {
+      setCurrentChatId(urlChatId);
+    }
+  }, [searchParams, currentChatId]);
 
   const handleSendMessage = (content: string, files?: File[], replyToId?: string) => {
     sendMessage(content, files, replyToId);
+  };
+
+  const handleChatSelect = (newChatId: string) => {
+    setCurrentChatId(newChatId);
+    // Update URL without page refresh
+    const url = new URL(window.location.href);
+    url.searchParams.set('chat', newChatId);
+    window.history.pushState(null, '', url.toString());
+  };
+
+  const handleNewChat = () => {
+    setCurrentChatId(undefined);
+    // Clear chat from URL
+    const url = new URL(window.location.href);
+    url.searchParams.delete('chat');
+    window.history.pushState(null, '', url.toString());
   };
 
   const handleShareChat = async () => {
@@ -78,10 +109,10 @@ export default function Home() {
           </div>
           <nav className="flex items-center space-x-4">
             <a 
-              href="/dashboards" 
+              href="/graphs" 
               className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 px-3 py-2 rounded-md text-sm font-medium"
             >
-              Dashboards
+              Graphs
             </a>
             <a 
               href="/export-demo" 
@@ -94,17 +125,28 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden">
-        <ChatContainer
-          chatId={chatId}
-          messages={chatMessages}
-          onSendMessage={handleSendMessage}
-          onEditMessage={editMessage}
-          onDeleteMessage={deleteMessage}
-          onShareChat={handleShareChat}
-          isLoading={isLoading}
-          className="h-full"
+      <main className="flex-1 overflow-hidden flex">
+        {/* Chat Sidebar */}
+        <ChatSidebar
+          currentChatId={currentChatId}
+          onChatSelect={handleChatSelect}
+          onNewChat={handleNewChat}
+          className="flex-shrink-0"
         />
+
+        {/* Main Chat Area */}
+        <div className="flex-1 overflow-hidden">
+          <ChatContainer
+            chatId={chatId}
+            messages={chatMessages}
+            onSendMessage={handleSendMessage}
+            onEditMessage={editMessage}
+            onDeleteMessage={deleteMessage}
+            onShareChat={handleShareChat}
+            isLoading={isLoading}
+            className="h-full"
+          />
+        </div>
       </main>
     </div>
   );
