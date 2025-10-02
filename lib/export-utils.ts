@@ -7,6 +7,32 @@ function createCompatibilityCSS(): string {
     * { 
       color-scheme: none !important; 
     }
+    
+    /* Ensure white background  } catch (error) {
+    console.error('Chart export failed:', error);
+    throw error;
+  } finally {
+    if (restoreBackgrounds) {
+      restoreBackgrounds();
+    }
+  }
+}    body, html {
+      background-color: rgb(255 255 255) !important;
+    }
+    
+    /* Ensure elements with transparent backgrounds get white */
+    div, section, article, main, header, footer, nav, aside {
+      background-color: rgb(255 255 255) !important;
+    }
+    
+    /* Override transparent and inherit backgrounds */
+    [style*="background: transparent"], 
+    [style*="background-color: transparent"],
+    [style*="background: inherit"],
+    [style*="background-color: inherit"] {
+      background-color: rgb(255 255 255) !important;
+    }
+    
     /* Override Tailwind CSS colors that might use modern color functions */
     .bg-blue-500 { background-color: rgb(59 130 246) !important; }
     .bg-blue-600 { background-color: rgb(37 99 235) !important; }
@@ -41,6 +67,16 @@ function createCompatibilityCSS(): string {
     .border-gray-200 { border-color: rgb(229 231 235) !important; }
     .border-gray-300 { border-color: rgb(209 213 219) !important; }
     .border-blue-500 { border-color: rgb(59 130 246) !important; }
+    
+    /* Canvas and SVG backgrounds for charts */
+    canvas, svg {
+      background-color: rgb(255 255 255) !important;
+    }
+    
+    /* Chart container backgrounds */
+    .chart-container, [class*="chart"] {
+      background-color: rgb(255 255 255) !important;
+    }
   `;
 }
 
@@ -67,29 +103,88 @@ export interface BulkExportOptions {
 }
 
 /**
- * Capture a screenshot of a DOM element
+ * Capture a screenshot of a DOM element with improved positioning
  */
 export async function captureScreenshot(
   element: HTMLElement,
   options: ExportOptions = { format: 'png' }
 ): Promise<string | null> {
+  let restoreStyles: (() => void) | null = null;
+  
+  let restoreBackgrounds: (() => void) | null = null;
+  
   try {
+    // Wait for any pending renders (especially important for charts)
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Ensure element is visible and properly positioned
+    const elementRect = element.getBoundingClientRect();
+    const isElementVisible = elementRect.width > 0 && elementRect.height > 0;
+    
+    if (!isElementVisible) {
+      throw new Error('Element is not visible or has no dimensions');
+    }
+
+    // Prepare element for screenshot (fix positioning issues)
+    restoreStyles = prepareElementForScreenshot(element);
+    
+    // Ensure white backgrounds for image exports
+    restoreBackgrounds = ensureElementWhiteBackground(element);
+
+    // Scroll element into view if needed
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    
+    // Wait for scroll to complete and styles to be applied
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Recalculate rect after style changes
+    const updatedRect = element.getBoundingClientRect();
+
     const canvas = await html2canvas(element, {
       scale: options.scale || 2,
       backgroundColor: '#ffffff',
       logging: false,
       useCORS: true,
       allowTaint: true,
+      // Fix positioning issues
+      x: 0,
+      y: 0,
+      width: Math.ceil(updatedRect.width),
+      height: Math.ceil(updatedRect.height),
+      // Scroll position handling
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
       // Use foreignObjectRendering to handle modern CSS better
       foreignObjectRendering: true,
       // Add onclone callback to fix modern CSS color function issues
-      onclone: createHtml2CanvasCloneCallback(),
+      onclone: (clonedDoc) => {
+        // Apply white background to body and html
+        clonedDoc.body.style.backgroundColor = '#ffffff';
+        clonedDoc.documentElement.style.backgroundColor = '#ffffff';
+        
+        // Apply our CSS compatibility fixes
+        const compatCallback = createHtml2CanvasCloneCallback();
+        compatCallback(clonedDoc);
+      },
     });
 
+    // Ensure canvas has white background
+    ensureCanvasWhiteBackground(canvas);
+
     if (options.format === 'pdf') {
-      return canvasToPDF(canvas, options.filename);
+      try {
+        return await canvasToPDF(canvas, options.filename);
+      } catch (error) {
+        console.error('PDF export failed:', error);
+        throw new Error(`PDF export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
 
+    // Ensure canvas has white background for image exports
+    ensureCanvasWhiteBackground(canvas);
+    
     const dataUrl = canvas.toDataURL(
       `image/${options.format}`,
       options.quality || 0.95
@@ -103,6 +198,91 @@ export async function captureScreenshot(
   } catch (error) {
     console.error('Screenshot capture failed:', error);
     return null;
+  } finally {
+    // Restore original styles
+    if (restoreStyles) {
+      restoreStyles();
+    }
+  }
+}
+
+/**
+ * Specialized function for capturing chart elements with better positioning
+ */
+export async function captureChartScreenshot(
+  chartElement: HTMLElement,
+  options: ExportOptions = { format: 'png' }
+): Promise<string | null> {
+  let restoreBackgrounds: (() => void) | null = null;
+  
+  try {
+    // Wait for chart animations to complete
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Ensure white backgrounds for the chart area
+    restoreBackgrounds = ensureElementWhiteBackground(chartElement);
+    
+    // Find the actual chart canvas if it exists (for Chart.js charts)
+    const canvas = chartElement.querySelector('canvas');
+    if (canvas) {
+      // If it's a Chart.js canvas, we can export directly
+      if (options.format === 'pdf') {
+        try {
+          return await canvasToPDF(canvas, options.filename);
+        } catch (error) {
+          console.error('Chart PDF export failed:', error);
+          throw new Error(`Chart PDF export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      } else {
+        // Ensure canvas has white background for image exports
+        ensureCanvasWhiteBackground(canvas);
+        
+        const dataUrl = canvas.toDataURL(`image/${options.format}`, options.quality || 0.95);
+        
+        if (options.filename) {
+          downloadDataUrl(dataUrl, options.filename);
+        }
+        
+        return dataUrl;
+      }
+    }
+
+    // For SVG charts or complex HTML charts, use html2canvas with special handling
+    const parentElement = chartElement.parentElement;
+    if (parentElement) {
+      // Temporarily ensure parent has stable positioning and white background
+      const originalParentStyle = {
+        position: parentElement.style.position,
+        transform: parentElement.style.transform,
+        overflow: parentElement.style.overflow,
+        backgroundColor: parentElement.style.backgroundColor
+      };
+      
+      parentElement.style.position = 'static';
+      parentElement.style.transform = 'none';
+      parentElement.style.overflow = 'visible';
+      parentElement.style.backgroundColor = '#ffffff';
+      
+      try {
+        const result = await captureScreenshot(chartElement, options);
+        return result;
+      } finally {
+        // Restore original parent styles
+        parentElement.style.position = originalParentStyle.position;
+        parentElement.style.transform = originalParentStyle.transform;
+        parentElement.style.overflow = originalParentStyle.overflow;
+        parentElement.style.backgroundColor = originalParentStyle.backgroundColor;
+      }
+    }
+    
+    return await captureScreenshot(chartElement, options);
+  } catch (error) {
+    console.error('Chart screenshot capture failed:', error);
+    return null;
+  } finally {
+    if (restoreBackgrounds) {
+      restoreBackgrounds();
+    }
   }
 }
 
@@ -134,15 +314,40 @@ export async function exportDashboardToPDF(
   filename?: string
 ): Promise<void> {
   try {
+    // Wait for dashboard to be ready
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Ensure dashboard is positioned correctly
+    const dashboardRect = dashboardElement.getBoundingClientRect();
+    
     const canvas = await html2canvas(dashboardElement, {
       scale: 2,
       backgroundColor: '#ffffff',
       logging: false,
       useCORS: true,
       allowTaint: true,
+      x: 0,
+      y: 0,
+      width: Math.ceil(dashboardRect.width),
+      height: Math.ceil(dashboardRect.height),
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
       foreignObjectRendering: true,
-      onclone: createHtml2CanvasCloneCallback(),
+      onclone: (clonedDoc) => {
+        // Apply white background to body and html
+        clonedDoc.body.style.backgroundColor = '#ffffff';
+        clonedDoc.documentElement.style.backgroundColor = '#ffffff';
+        
+        // Apply our CSS compatibility fixes
+        const compatCallback = createHtml2CanvasCloneCallback();
+        compatCallback(clonedDoc);
+      },
     });
+
+    // Ensure canvas has white background
+    ensureCanvasWhiteBackground(canvas);
 
     const pdf = new jsPDF({
       orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
@@ -193,54 +398,129 @@ export async function createImageZip(
 
 // Helper functions
 async function canvasToPDF(canvas: HTMLCanvasElement, filename?: string): Promise<string> {
-  const pdf = new jsPDF({
-    orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
-    unit: 'px',
-    format: [canvas.width, canvas.height],
-  });
+  try {
+    console.log('Generating PDF from canvas:', { width: canvas.width, height: canvas.height });
+    
+    const imgData = canvas.toDataURL('image/png', 1.0);
+    
+    if (!imgData || imgData === 'data:,') {
+      throw new Error('Failed to generate image data from canvas');
+    }
+    
+    console.log('Canvas image data generated successfully, length:', imgData.length);
+    
+    // Calculate dimensions for A4 page
+    const pdf = new jsPDF({
+      orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
 
-  const imgData = canvas.toDataURL('image/png');
-  pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    
+    // Calculate scaling to fit the image on the page with margins
+    const margin = 10;
+    const availableWidth = pageWidth - (margin * 2);
+    const availableHeight = pageHeight - (margin * 2);
+    
+    // Convert canvas dimensions to mm (assuming 96 DPI)
+    const mmPerPixel = 25.4 / 96; // 25.4 mm per inch, 96 pixels per inch
+    const canvasWidthMm = canvas.width * mmPerPixel;
+    const canvasHeightMm = canvas.height * mmPerPixel;
+    
+    // Calculate scaling ratio to fit within available space
+    const scaleWidth = availableWidth / canvasWidthMm;
+    const scaleHeight = availableHeight / canvasHeightMm;
+    const scale = Math.min(scaleWidth, scaleHeight, 1); // Don't upscale
+    
+    const finalWidth = canvasWidthMm * scale;
+    const finalHeight = canvasHeightMm * scale;
+    
+    // Center the image on the page
+    const x = (pageWidth - finalWidth) / 2;
+    const y = (pageHeight - finalHeight) / 2;
 
-  if (filename) {
-    pdf.save(filename);
+    console.log('Adding image to PDF:', { x, y, finalWidth, finalHeight });
+    
+    pdf.addImage(imgData, 'PNG', x, y, finalWidth, finalHeight);
+
+    if (filename) {
+      console.log('Saving PDF as:', filename);
+      pdf.save(filename);
+    }
+
+    console.log('PDF generation completed successfully');
+    return imgData;
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    throw new Error(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-
-  return imgData;
 }
 
 async function bulkExportToPDF(
   elements: { element: HTMLElement; title: string }[],
   options: BulkExportOptions
 ): Promise<void> {
-  const pdf = new jsPDF('portrait', 'mm', 'a4');
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  let yPosition = 20;
+  try {
+    const pdf = new jsPDF('portrait', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    let yPosition = 20;
 
   for (let i = 0; i < elements.length; i++) {
     const { element, title } = elements[i];
+    let restoreBackgrounds: (() => void) | null = null;
     
-    if (i > 0) {
-      pdf.addPage();
-      yPosition = 20;
-    }
+    try {
+      if (i > 0) {
+        pdf.addPage();
+        yPosition = 20;
+      }
 
-    // Add title if enabled
-    if (options.includeTitle) {
-      pdf.setFontSize(14);
-      pdf.text(title, 20, yPosition);
-      yPosition += 10;
-    }
+      // Add title if enabled
+      if (options.includeTitle) {
+        pdf.setFontSize(14);
+        pdf.text(title, 20, yPosition);
+        yPosition += 10;
+      }
 
+      // Wait for element to be ready
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Ensure white backgrounds
+      restoreBackgrounds = ensureElementWhiteBackground(element);
+      
+      // Ensure element is positioned correctly
+      const elementRect = element.getBoundingClientRect();
+    
     // Capture element
     const canvas = await html2canvas(element, {
       scale: 1.5,
       backgroundColor: '#ffffff',
       logging: false,
+      x: 0,
+      y: 0,
+      width: Math.ceil(elementRect.width),
+      height: Math.ceil(elementRect.height),
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
       foreignObjectRendering: true,
-      onclone: createHtml2CanvasCloneCallback(),
+      onclone: (clonedDoc) => {
+        // Apply white background to body and html
+        clonedDoc.body.style.backgroundColor = '#ffffff';
+        clonedDoc.documentElement.style.backgroundColor = '#ffffff';
+        
+        // Apply our CSS compatibility fixes
+        const compatCallback = createHtml2CanvasCloneCallback();
+        compatCallback(clonedDoc);
+      },
     });
+
+    // Ensure canvas has white background
+    ensureCanvasWhiteBackground(canvas);
 
     const imgWidth = pageWidth - 40; // 20mm margin on each side
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
@@ -257,12 +537,21 @@ async function bulkExportToPDF(
       }
     }
 
-    const imgData = canvas.toDataURL('image/png');
-    pdf.addImage(imgData, 'PNG', 20, yPosition, imgWidth, imgHeight);
-    yPosition += imgHeight + 10;
+      const imgData = canvas.toDataURL('image/png');
+      pdf.addImage(imgData, 'PNG', 20, yPosition, imgWidth, imgHeight);
+      yPosition += imgHeight + 10;
+    } finally {
+      if (restoreBackgrounds) {
+        restoreBackgrounds();
+      }
+    }
   }
 
-  pdf.save(options.filename || `graphs_export_${Date.now()}.pdf`);
+    pdf.save(options.filename || `graphs_export_${Date.now()}.pdf`);
+  } catch (error) {
+    console.error('Error in bulk PDF export:', error);
+    throw new Error(`Failed to generate bulk PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 async function bulkExportToPNG(
@@ -272,18 +561,54 @@ async function bulkExportToPNG(
   const images: { data: string; filename: string }[] = [];
 
   for (const { element, title } of elements) {
+    let restoreBackgrounds: (() => void) | null = null;
+    
+    try {
+      // Wait for element to be ready
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Ensure white backgrounds
+      restoreBackgrounds = ensureElementWhiteBackground(element);
+      
+      // Ensure element is positioned correctly
+      const elementRect = element.getBoundingClientRect();
+    
     const canvas = await html2canvas(element, {
       scale: 2,
       backgroundColor: '#ffffff',
       logging: false,
+      x: 0,
+      y: 0,
+      width: Math.ceil(elementRect.width),
+      height: Math.ceil(elementRect.height),
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
       foreignObjectRendering: true,
-      onclone: createHtml2CanvasCloneCallback(),
+      onclone: (clonedDoc) => {
+        // Apply white background to body and html
+        clonedDoc.body.style.backgroundColor = '#ffffff';
+        clonedDoc.documentElement.style.backgroundColor = '#ffffff';
+        
+        // Apply our CSS compatibility fixes
+        const compatCallback = createHtml2CanvasCloneCallback();
+        compatCallback(clonedDoc);
+      },
     });
 
-    const dataUrl = canvas.toDataURL('image/png');
-    const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
-    
-    images.push({ data: dataUrl, filename });
+      // Ensure canvas has white background
+      ensureCanvasWhiteBackground(canvas);
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
+      
+      images.push({ data: dataUrl, filename });
+    } finally {
+      if (restoreBackgrounds) {
+        restoreBackgrounds();
+      }
+    }
   }
 
   // Create and download ZIP
@@ -301,6 +626,114 @@ function downloadDataUrl(dataUrl: string, filename: string): void {
   link.href = dataUrl;
   link.download = filename;
   link.click();
+}
+
+// Helper function to ensure canvas has a white background
+function ensureCanvasWhiteBackground(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    // Create a new canvas with the original content
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    if (tempCtx) {
+      // Copy the original canvas content to temp canvas
+      tempCtx.drawImage(canvas, 0, 0);
+      
+      // Fill the original canvas with white background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw the original content back on top of white background
+      ctx.drawImage(tempCanvas, 0, 0);
+    }
+  }
+}
+
+// Helper function to ensure element has white backgrounds before capture
+function ensureElementWhiteBackground(element: HTMLElement): () => void {
+  const elementsToRestore: Array<{ element: HTMLElement; originalBackground: string }> = [];
+  
+  // Find all elements within the target element
+  const allElements = [element, ...element.querySelectorAll('*')] as HTMLElement[];
+  
+  allElements.forEach(el => {
+    const computedStyle = window.getComputedStyle(el);
+    const currentBg = el.style.backgroundColor;
+    
+    // If background is transparent, inherit, or not set, make it white
+    if (
+      !currentBg || 
+      currentBg === 'transparent' || 
+      currentBg === 'inherit' ||
+      computedStyle.backgroundColor === 'rgba(0, 0, 0, 0)' ||
+      computedStyle.backgroundColor === 'transparent'
+    ) {
+      elementsToRestore.push({ element: el, originalBackground: currentBg });
+      el.style.backgroundColor = '#ffffff';
+    }
+  });
+  
+  // Return restore function
+  return () => {
+    elementsToRestore.forEach(({ element, originalBackground }) => {
+      element.style.backgroundColor = originalBackground;
+    });
+  };
+}
+
+/**
+ * Prepare element for screenshot by fixing common positioning issues
+ */
+function prepareElementForScreenshot(element: HTMLElement): () => void {
+  const originalStyles: Record<string, string> = {};
+  const elementsToRestore: Array<{ element: HTMLElement; styles: Record<string, string> }> = [];
+
+  // Helper to save and modify styles
+  const saveAndModifyStyle = (el: HTMLElement, styles: Record<string, string>) => {
+    const original: Record<string, string> = {};
+    Object.keys(styles).forEach(prop => {
+      original[prop] = el.style.getPropertyValue(prop);
+      el.style.setProperty(prop, styles[prop]);
+    });
+    elementsToRestore.push({ element: el, styles: original });
+  };
+
+  // Fix the target element
+  saveAndModifyStyle(element, {
+    'position': 'relative',
+    'z-index': '1',
+    'transform': 'none',
+    'filter': 'none'
+  });
+
+  // Fix parent containers that might cause issues
+  let parent = element.parentElement;
+  while (parent && parent !== document.body) {
+    const computed = window.getComputedStyle(parent);
+    if (computed.transform !== 'none' || computed.position === 'fixed') {
+      saveAndModifyStyle(parent, {
+        'transform': 'none',
+        'position': 'static'
+      });
+    }
+    parent = parent.parentElement;
+  }
+
+  // Return cleanup function
+  return () => {
+    elementsToRestore.forEach(({ element, styles }) => {
+      Object.keys(styles).forEach(prop => {
+        if (styles[prop]) {
+          element.style.setProperty(prop, styles[prop]);
+        } else {
+          element.style.removeProperty(prop);
+        }
+      });
+    });
+  };
 }
 
 /**
