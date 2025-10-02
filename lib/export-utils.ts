@@ -1,6 +1,58 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
+// Helper function to create CSS overrides for modern color functions
+function createCompatibilityCSS(): string {
+  return `
+    * { 
+      color-scheme: none !important; 
+    }
+    /* Override Tailwind CSS colors that might use modern color functions */
+    .bg-blue-500 { background-color: rgb(59 130 246) !important; }
+    .bg-blue-600 { background-color: rgb(37 99 235) !important; }
+    .bg-red-500 { background-color: rgb(239 68 68) !important; }
+    .bg-green-500 { background-color: rgb(34 197 94) !important; }
+    .bg-yellow-500 { background-color: rgb(245 158 11) !important; }
+    .bg-purple-500 { background-color: rgb(139 92 246) !important; }
+    .bg-indigo-500 { background-color: rgb(99 102 241) !important; }
+    .bg-pink-500 { background-color: rgb(236 72 153) !important; }
+    .bg-gray-50 { background-color: rgb(249 250 251) !important; }
+    .bg-gray-100 { background-color: rgb(243 244 246) !important; }
+    .bg-gray-200 { background-color: rgb(229 231 235) !important; }
+    .bg-gray-300 { background-color: rgb(209 213 219) !important; }
+    .bg-gray-400 { background-color: rgb(156 163 175) !important; }
+    .bg-gray-500 { background-color: rgb(107 114 128) !important; }
+    .bg-gray-600 { background-color: rgb(75 85 99) !important; }
+    .bg-gray-700 { background-color: rgb(55 65 81) !important; }
+    .bg-gray-800 { background-color: rgb(31 41 55) !important; }
+    .bg-gray-900 { background-color: rgb(17 24 39) !important; }
+    .bg-white { background-color: rgb(255 255 255) !important; }
+    .text-gray-900 { color: rgb(17 24 39) !important; }
+    .text-gray-800 { color: rgb(31 41 55) !important; }
+    .text-gray-700 { color: rgb(55 65 81) !important; }
+    .text-gray-600 { color: rgb(75 85 99) !important; }
+    .text-gray-500 { color: rgb(107 114 128) !important; }
+    .text-gray-400 { color: rgb(156 163 175) !important; }
+    .text-blue-600 { color: rgb(37 99 235) !important; }
+    .text-blue-500 { color: rgb(59 130 246) !important; }
+    .text-red-600 { color: rgb(220 38 38) !important; }
+    .text-green-600 { color: rgb(22 163 74) !important; }
+    .text-white { color: rgb(255 255 255) !important; }
+    .border-gray-200 { border-color: rgb(229 231 235) !important; }
+    .border-gray-300 { border-color: rgb(209 213 219) !important; }
+    .border-blue-500 { border-color: rgb(59 130 246) !important; }
+  `;
+}
+
+// Helper function to create onclone callback for html2canvas
+function createHtml2CanvasCloneCallback() {
+  return (clonedDoc: Document) => {
+    const style = clonedDoc.createElement('style');
+    style.textContent = createCompatibilityCSS();
+    clonedDoc.head.appendChild(style);
+  };
+}
+
 export interface ExportOptions {
   format: 'png' | 'jpg' | 'pdf';
   quality?: number;
@@ -28,6 +80,10 @@ export async function captureScreenshot(
       logging: false,
       useCORS: true,
       allowTaint: true,
+      // Use foreignObjectRendering to handle modern CSS better
+      foreignObjectRendering: true,
+      // Add onclone callback to fix modern CSS color function issues
+      onclone: createHtml2CanvasCloneCallback(),
     });
 
     if (options.format === 'pdf') {
@@ -84,6 +140,8 @@ export async function exportDashboardToPDF(
       logging: false,
       useCORS: true,
       allowTaint: true,
+      foreignObjectRendering: true,
+      onclone: createHtml2CanvasCloneCallback(),
     });
 
     const pdf = new jsPDF({
@@ -180,6 +238,8 @@ async function bulkExportToPDF(
       scale: 1.5,
       backgroundColor: '#ffffff',
       logging: false,
+      foreignObjectRendering: true,
+      onclone: createHtml2CanvasCloneCallback(),
     });
 
     const imgWidth = pageWidth - 40; // 20mm margin on each side
@@ -216,6 +276,8 @@ async function bulkExportToPNG(
       scale: 2,
       backgroundColor: '#ffffff',
       logging: false,
+      foreignObjectRendering: true,
+      onclone: createHtml2CanvasCloneCallback(),
     });
 
     const dataUrl = canvas.toDataURL('image/png');
