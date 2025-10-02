@@ -292,9 +292,10 @@ export function useChatWithFiles({
       if (charts.length > 0) {
         // Save charts to both local storage and database
         for (const chart of charts) {
-          const graphId = nanoid();
+          let finalGraphId = nanoid(); // Start with temp ID
+          
           const storedGraph = {
-            id: graphId,
+            id: finalGraphId,
             title: chart.title,
             description: chart.description,
             chartType: chart.chartType,
@@ -304,10 +305,7 @@ export function useChatWithFiles({
             createdAt: new Date().toISOString()
           };
           
-          // Save to local storage (immediate)
-          localStorageManager.saveGraph(storedGraph);
-          
-          // Save to database (async) - works for both authenticated and guest users
+          // First, try to save to database to get the real ID
           try {
             const dbPayload = {
               title: chart.title,
@@ -339,13 +337,9 @@ export function useChatWithFiles({
               const dbGraph = await response.json();
               console.log('Graph saved to database:', dbGraph.id, dbGraph.title);
               
-              // Update local storage with the database ID for consistency
-              localStorageManager.deleteGraph(graphId);
-              const updatedStoredGraph = {
-                ...storedGraph,
-                id: dbGraph.id,
-              };
-              localStorageManager.saveGraph(updatedStoredGraph);
+              // Use the database ID as the final ID
+              finalGraphId = dbGraph.id;
+              storedGraph.id = dbGraph.id;
             } else if (response.status === 401) {
               console.log('User not authenticated - graph saved to local storage only');
             } else {
@@ -354,6 +348,9 @@ export function useChatWithFiles({
           } catch (dbError) {
             console.warn('Error saving graph to database:', dbError);
           }
+          
+          // Save to local storage with final ID (database ID if available, temp ID if not)
+          localStorageManager.saveGraph(storedGraph);
         }
       }
 

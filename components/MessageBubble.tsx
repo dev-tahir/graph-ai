@@ -4,11 +4,71 @@ import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Edit2, Check, X, Reply, Copy, Trash2, MoreVertical } from 'lucide-react';
+import { Edit2, Check, X, Reply, Copy, Trash2, MoreVertical, Loader2, CheckCircle } from 'lucide-react';
 import { FileItem } from './FileUpload';
 import ChatGraph from './ChatGraph';
 import { nanoid } from 'nanoid';
+import { localStorageManager } from '@/lib/local-storage';
 import type { ChartConfig } from '@/lib/chart-generator';
+
+// Chart Loading State Component
+const ChartLoadingState = ({ title, description }: { title: string; description?: string }) => {
+  return (
+    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+      <div className="flex items-center space-x-3">
+        <div className="flex-shrink-0">
+          <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            {title}
+          </h4>
+          {description && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">
+              {description}
+            </p>
+          )}
+          <div className="flex items-center mt-2">
+            <span className="text-xs text-blue-600 dark:text-blue-400">
+              Saving chart to database...
+            </span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Loading placeholder for chart area */}
+      <div className="mt-3 bg-gray-100 dark:bg-gray-700 rounded-lg h-64 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-gray-400 animate-spin mx-auto mb-2" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Preparing chart...
+          </p>
+        </div>
+      </div>
+      
+      {/* Disabled action buttons to show it's not ready yet */}
+      <div className="flex items-center justify-between mt-3">
+        <div className="text-xs text-gray-500">
+          Chart will be available shortly
+        </div>
+        <div className="flex space-x-2">
+          <button
+            disabled
+            className="px-3 py-1 text-xs bg-gray-200 text-gray-400 rounded cursor-not-allowed"
+          >
+            View Fullscreen
+          </button>
+          <button
+            disabled
+            className="px-3 py-1 text-xs bg-gray-200 text-gray-400 rounded cursor-not-allowed"
+          >
+            Save to Library
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface Message {
   id: string;
@@ -61,6 +121,9 @@ const MessageBubble = ({
     description?: string;
     chartType: string;
     config: ChartConfig;
+    isLoading?: boolean;
+    isSaved?: boolean;
+    justSaved?: boolean;
   }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,6 +136,9 @@ const MessageBubble = ({
         description?: string;
         chartType: string;
         config: ChartConfig;
+        isLoading?: boolean;
+        isSaved?: boolean;
+        justSaved?: boolean;
       }> = [];
       
       // Look for JSON code blocks containing chart configurations
@@ -86,12 +152,31 @@ const MessageBubble = ({
           
           // Check if it's a chart configuration
           if (parsed.type === 'chart' && parsed.config && parsed.chartType) {
+            // Use graphId from the JSON if available (set after database save)
+            let chartId = parsed.graphId;
+            
+            if (!chartId) {
+              // Try to find existing saved graph with matching title and config
+              const existingGraphs = localStorageManager.getGraphs();
+              const existingGraph = existingGraphs.find(graph => 
+                graph.title === (parsed.title || 'Untitled Chart') &&
+                JSON.stringify(graph.chartConfig) === JSON.stringify(parsed.config)
+              );
+              chartId = existingGraph?.id || nanoid();
+            }
+            
+            // Check if this chart is already saved (has a real database ID)
+            const existingGraphs = localStorageManager.getGraphs();
+            const existingGraph = existingGraphs.find(graph => graph.id === chartId);
+            
             charts.push({
-              id: nanoid(),
+              id: chartId,
               title: parsed.title || 'Untitled Chart',
               description: parsed.description,
               chartType: parsed.chartType,
-              config: parsed.config
+              config: parsed.config,
+              isLoading: !existingGraph, // Loading if not found in local storage
+              isSaved: !!existingGraph  // Saved if found in local storage
             });
           }
         } catch (err) {
@@ -107,6 +192,66 @@ const MessageBubble = ({
       parseChartsFromContent();
     }
   }, [message.content, message.role]);
+
+  // Poll for chart save status updates
+  useEffect(() => {
+    const hasLoadingCharts = parsedCharts.some(chart => chart.isLoading);
+    if (!hasLoadingCharts) return;
+
+    const checkSaveStatus = () => {
+      const existingGraphs = localStorageManager.getGraphs();
+      
+      setParsedCharts(prev => prev.map(chart => {
+        if (chart.isLoading) {
+          const savedGraph = existingGraphs.find(graph => 
+            graph.title === chart.title &&
+            JSON.stringify(graph.chartConfig) === JSON.stringify(chart.config)
+          );
+          
+          if (savedGraph) {
+            return {
+              ...chart,
+              id: savedGraph.id, // Update with actual saved ID
+              isLoading: false,
+              isSaved: true,
+              justSaved: true
+            };
+          }
+        }
+        return chart;
+      }));
+    };
+
+    const interval = setInterval(checkSaveStatus, 500); // Check every 500ms
+    
+    // Stop polling after 10 seconds to avoid infinite polling
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+      // Mark any still-loading charts as failed/timeout
+      setParsedCharts(prev => prev.map(chart => 
+        chart.isLoading ? { ...chart, isLoading: false, isSaved: false } : chart
+      ));
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [parsedCharts]);
+
+  // Clear justSaved flag after 3 seconds
+  useEffect(() => {
+    const justSavedCharts = parsedCharts.filter(chart => chart.justSaved);
+    if (justSavedCharts.length === 0) return;
+
+    const timeout = setTimeout(() => {
+      setParsedCharts(prev => prev.map(chart => 
+        chart.justSaved ? { ...chart, justSaved: false } : chart
+      ));
+    }, 3000);
+
+    return () => clearTimeout(timeout);
+  }, [parsedCharts]);
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
@@ -311,15 +456,31 @@ const MessageBubble = ({
         {parsedCharts.length > 0 && (
           <div className="mt-4 space-y-4">
             {parsedCharts.map((chart) => (
-              <ChatGraph
-                key={chart.id}
-                graphId={chart.id}
-                config={chart.config}
-                title={chart.title}
-                description={chart.description}
-                compact={false}
-                showActions={true}
-              />
+              chart.isLoading ? (
+                <ChartLoadingState
+                  key={chart.id}
+                  title={chart.title}
+                  description={chart.description}
+                />
+              ) : (
+                <div className="relative">
+                  <ChatGraph
+                    key={chart.id}
+                    graphId={chart.id}
+                    config={chart.config}
+                    title={chart.title}
+                    description={chart.description}
+                    compact={false}
+                    showActions={true}
+                  />
+                  {chart.justSaved && (
+                    <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded-full text-xs flex items-center space-x-1 shadow-lg animate-pulse">
+                      <CheckCircle className="w-3 h-3" />
+                      <span>Saved!</span>
+                    </div>
+                  )}
+                </div>
+              )
             ))}
           </div>
         )}
