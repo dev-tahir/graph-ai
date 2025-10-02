@@ -31,14 +31,24 @@ export async function GET(req: NextRequest) {
     const where: any = {};
     
     // If user is logged in, show their graphs + public graphs
-    // If not logged in, only show public graphs
+    // If guest user, show their graphs + public graphs  
+    // If anonymous, only show public graphs
     if (session?.user?.id) {
       where.OR = [
         { userId: session.user.id },
         { isPublic: true }
       ];
     } else {
-      where.isPublic = true;
+      // Check for guest user
+      const guestUserId = req.headers.get('x-guest-user-id');
+      if (guestUserId && guestUserId.startsWith('guest_')) {
+        where.OR = [
+          { userId: guestUserId },
+          { isPublic: true }
+        ];
+      } else {
+        where.isPublic = true;
+      }
     }
     
     // Add search filter
@@ -107,23 +117,49 @@ export async function POST(req: NextRequest) {
   try {
     const session = await auth();
     
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
-    
     const body = await req.json();
     const validatedData = createGraphSchema.parse(body);
+    
+    // Support both authenticated users and guest users
+    let userId = null;
+    let includeUser = false;
+    
+    if (session?.user?.id) {
+      // Authenticated user - use their actual user ID
+      userId = session.user.id;
+      includeUser = true;
+    } else {
+      // Guest user - create or get guest user from database
+      const guestUserId = req.headers.get('x-guest-user-id');
+      if (guestUserId && guestUserId.startsWith('guest_')) {
+        // Check if guest user exists, create if not
+        let guestUser = await prisma.user.findUnique({
+          where: { id: guestUserId }
+        });
+        
+        if (!guestUser) {
+          // Create new guest user
+          guestUser = await prisma.user.create({
+            data: {
+              id: guestUserId,
+              email: `${guestUserId}@guest.local`,
+              name: 'Guest User',
+            }
+          });
+        }
+        
+        userId = guestUser.id;
+        includeUser = true;
+      }
+    }
     
     const graph = await prisma.graph.create({
       data: {
         ...validatedData,
-        userId: session.user.id,
+        userId,
         version: 1,
       },
-      include: {
+      include: includeUser ? {
         user: {
           select: {
             id: true,
@@ -131,7 +167,7 @@ export async function POST(req: NextRequest) {
             email: true,
           },
         },
-      },
+      } : undefined,
     });
     
     return NextResponse.json(graph, { status: 201 });
@@ -146,7 +182,10 @@ export async function POST(req: NextRequest) {
     
     console.error('Error creating graph:', error);
     return NextResponse.json(
-      { error: 'Failed to create graph' },
+      { 
+        error: 'Failed to create graph',
+        details: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.message : String(error)) : undefined
+      },
       { status: 500 }
     );
   }

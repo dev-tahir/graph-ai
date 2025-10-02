@@ -290,10 +290,11 @@ export function useChatWithFiles({
       // Parse any chart configurations from the response
       const charts = parseChartsFromResponse(assistantContent);
       if (charts.length > 0) {
-        // Save charts to local storage
-        charts.forEach((chart: ParsedChart) => {
+        // Save charts to both local storage and database
+        for (const chart of charts) {
+          const graphId = nanoid();
           const storedGraph = {
-            id: nanoid(),
+            id: graphId,
             title: chart.title,
             description: chart.description,
             chartType: chart.chartType,
@@ -302,8 +303,58 @@ export function useChatWithFiles({
             version: 1,
             createdAt: new Date().toISOString()
           };
+          
+          // Save to local storage (immediate)
           localStorageManager.saveGraph(storedGraph);
-        });
+          
+          // Save to database (async) - works for both authenticated and guest users
+          try {
+            const dbPayload = {
+              title: chart.title,
+              description: chart.description,
+              chartType: chart.chartType.toUpperCase(), // Database expects uppercase
+              chartConfig: chart.config,
+              data: chart.config.data,
+              isPublic: false, // Default to private
+            };
+            
+            // Include guest user ID if not authenticated
+            const headers: HeadersInit = {
+              'Content-Type': 'application/json',
+            };
+            
+            // Add user ID (guest or authenticated)
+            const userId = getCurrentUserId(session);
+            if (userId && userId.startsWith('guest_')) {
+              headers['x-guest-user-id'] = userId;
+            }
+            
+            const response = await fetch('/api/graphs', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(dbPayload),
+            });
+            
+            if (response.ok) {
+              const dbGraph = await response.json();
+              console.log('Graph saved to database:', dbGraph.id, dbGraph.title);
+              
+              // Update local storage with the database ID for consistency
+              localStorageManager.deleteGraph(graphId);
+              const updatedStoredGraph = {
+                ...storedGraph,
+                id: dbGraph.id,
+              };
+              localStorageManager.saveGraph(updatedStoredGraph);
+            } else if (response.status === 401) {
+              console.log('User not authenticated - graph saved to local storage only');
+            } else {
+              console.warn('Failed to save graph to database:', response.status, response.statusText);
+            }
+          } catch (dbError) {
+            console.warn('Error saving graph to database:', dbError);
+          }
+        }
       }
 
       // Save final assistant message to local storage

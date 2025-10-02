@@ -26,13 +26,37 @@ export default function GraphPage() {
   const loadGraphData = async () => {
     try {
       setIsLoading(true);
-      const graph = localStorageManager.getGraph(graphId);
       
-      if (graph) {
-        setInitialConfig(graph.chartConfig as ChartConfig);
-        setGraphTitle(graph.title);
-      } else {
-        setError('Graph not found');
+      // First, try to get the graph from local storage
+      const localGraph = localStorageManager.getGraph(graphId);
+      
+      if (localGraph) {
+        setInitialConfig(localGraph.chartConfig as ChartConfig);
+        setGraphTitle(localGraph.title);
+        return;
+      }
+      
+      // If not found in local storage, try to fetch from database
+      try {
+        const response = await fetch(`/api/graphs/${graphId}`);
+        
+        if (response.ok) {
+          const dbGraph = await response.json();
+          setInitialConfig(dbGraph.chartConfig as ChartConfig);
+          setGraphTitle(dbGraph.title);
+          console.log('Graph loaded from database:', dbGraph.title);
+        } else if (response.status === 404) {
+          setError('Graph not found in local storage or database');
+        } else if (response.status === 403) {
+          setError('Access denied - you do not have permission to view this graph');
+        } else if (response.status === 401) {
+          setError('Authentication required - please sign in to view this graph');
+        } else {
+          setError('Failed to load graph');
+        }
+      } catch (fetchError) {
+        console.error('Error fetching graph from database:', fetchError);
+        setError('Graph not found in local storage or database');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load graph');

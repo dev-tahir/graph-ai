@@ -47,8 +47,20 @@ export async function GET(
     }
     
     // Check permissions
-    const canView = graph.isPublic || 
-                   (session?.user?.id && graph.userId === session.user.id);
+    let canView = graph.isPublic;
+    
+    if (!canView && session?.user?.id) {
+      // Authenticated user can view their own graphs
+      canView = graph.userId === session.user.id;
+    }
+    
+    if (!canView) {
+      // Check for guest user access
+      const guestUserId = req.headers.get('x-guest-user-id');
+      if (guestUserId && guestUserId.startsWith('guest_') && graph.userId === guestUserId) {
+        canView = true;
+      }
+    }
     
     if (!canView) {
       return NextResponse.json(

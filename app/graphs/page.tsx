@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { localStorageManager, type StoredGraph } from '@/lib/local-storage';
+
+type GraphWithSource = StoredGraph & { source: 'local' | 'database' };
 import ChatGraph from '@/components/ChatGraph';
 import type { ChartConfig } from '@/lib/chart-generator';
 import { 
@@ -42,8 +44,8 @@ const SORT_OPTIONS = [
 
 export default function GraphLibraryPage() {
   const router = useRouter();
-  const [graphs, setGraphs] = useState<StoredGraph[]>([]);
-  const [filteredGraphs, setFilteredGraphs] = useState<StoredGraph[]>([]);
+  const [graphs, setGraphs] = useState<GraphWithSource[]>([]);
+  const [filteredGraphs, setFilteredGraphs] = useState<GraphWithSource[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [sortBy, setSortBy] = useState('newest');
@@ -59,11 +61,49 @@ export default function GraphLibraryPage() {
     filterAndSortGraphs();
   }, [graphs, searchTerm, selectedType, sortBy]);
 
-  const loadGraphs = () => {
+  const loadGraphs = async () => {
     setIsLoading(true);
     try {
-      const allGraphs = localStorageManager.getGraphs();
-      setGraphs(allGraphs);
+      // Load graphs from local storage
+      const localGraphs = localStorageManager.getGraphs();
+      
+      // Load graphs from database
+      const dbGraphs: StoredGraph[] = [];
+      try {
+        const response = await fetch('/api/graphs?limit=100');
+        if (response.ok) {
+          const data = await response.json();
+          // Convert database graphs to StoredGraph format
+          const convertedDbGraphs = data.graphs.map((dbGraph: any) => ({
+            id: dbGraph.id,
+            title: dbGraph.title,
+            description: dbGraph.description,
+            chartType: dbGraph.chartType.toLowerCase(),
+            chartConfig: dbGraph.chartConfig,
+            data: dbGraph.data,
+            version: dbGraph.version,
+            createdAt: dbGraph.createdAt,
+            source: 'database' as const // Mark source for identification
+          }));
+          dbGraphs.push(...convertedDbGraphs);
+        }
+      } catch (fetchError) {
+        console.error('Failed to fetch graphs from database:', fetchError);
+      }
+      
+      // Mark local graphs for identification
+      const markedLocalGraphs: GraphWithSource[] = localGraphs.map(graph => ({ ...graph, source: 'local' as const }));
+      
+      // Combine and deduplicate (database takes priority over local with same ID)
+      const combinedGraphs: GraphWithSource[] = [...markedLocalGraphs];
+      dbGraphs.forEach(dbGraph => {
+        const existsInLocal = combinedGraphs.find(g => g.id === dbGraph.id);
+        if (!existsInLocal) {
+          combinedGraphs.push(dbGraph as GraphWithSource);
+        }
+      });
+      
+      setGraphs(combinedGraphs);
     } catch (err) {
       console.error('Failed to load graphs:', err);
     } finally {
