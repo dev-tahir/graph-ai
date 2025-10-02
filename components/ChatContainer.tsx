@@ -118,15 +118,15 @@ const ChatContainer = ({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-gray-50 ${className}`}>
+    <div className={`flex flex-col h-full bg-gray-50 dark:bg-gray-900 ${className}`}>
       {/* Header */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-4 py-3">
+      <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               Chat {chatId ? `#${chatId.slice(0, 8)}` : ''}
             </h2>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
               {messages.length} messages
             </div>
           </div>
@@ -170,7 +170,7 @@ const ChatContainer = ({
               placeholder="Search messages..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500 bg-white dark:text-gray-100 dark:placeholder-gray-400 dark:bg-gray-800 dark:border-gray-600"
               autoFocus
             />
           </div>
@@ -183,10 +183,10 @@ const ChatContainer = ({
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
       >
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">
             <div className="text-center">
-              <h3 className="text-lg font-medium mb-2">Start a conversation</h3>
-              <p className="text-sm">
+              <h3 className="text-lg font-medium mb-2 text-gray-700 dark:text-gray-300">Start a conversation</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 Upload a CSV, JSON, or Excel file to begin creating graphs, or just ask a question!
               </p>
             </div>
@@ -196,7 +196,7 @@ const ChatContainer = ({
             <div key={date}>
               {/* Date separator */}
               <div className="flex items-center justify-center my-4">
-                <div className="px-3 py-1 bg-white border border-gray-200 rounded-full text-xs text-gray-500 font-medium">
+                <div className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full text-xs text-gray-500 dark:text-gray-400 font-medium">
                   {formatDateHeader(date)}
                 </div>
               </div>
@@ -224,9 +224,9 @@ const ChatContainer = ({
         {isLoading && (
           <div className="flex items-center justify-center py-4">
             <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+              <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
+              <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+              <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
             </div>
           </div>
         )}

@@ -145,7 +145,7 @@ const MessageBubble = ({
     <div 
       className={`
         flex items-start space-x-3 p-4 rounded-lg transition-colors cursor-pointer
-        ${isSelected ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'}
+        ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}
         ${isUser ? 'flex-row-reverse space-x-reverse' : ''}
       `}
       onClick={() => onSelect && onSelect(message)}
@@ -161,10 +161,10 @@ const MessageBubble = ({
       {/* Message Content */}
       <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
         <div className="flex items-center justify-between mb-1">
-          <div className={`text-sm font-medium ${isUser ? 'order-2' : ''}`}>
+          <div className={`text-sm font-medium text-gray-900 dark:text-gray-100 ${isUser ? 'order-2' : ''}`}>
             {isUser ? 'You' : isSystem ? 'System' : 'Assistant'}
             {message.isEdited && (
-              <span className="ml-1 text-xs text-gray-500">(edited)</span>
+              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">(edited)</span>
             )}
           </div>
           
@@ -182,7 +182,7 @@ const MessageBubble = ({
               
               {showMenu && (
                 <div className={`
-                  absolute top-full mt-1 w-36 bg-white border border-gray-200 rounded-md shadow-lg z-10
+                  absolute top-full mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-10
                   ${isUser ? 'right-0' : 'left-0'}
                 `}>
                   {isUser && onEdit && (
@@ -192,7 +192,7 @@ const MessageBubble = ({
                         setIsEditing(true);
                         setShowMenu(false);
                       }}
-                      className="w-full px-3 py-2 text-sm text-left hover:bg-gray-50 flex items-center space-x-2"
+                      className="w-full px-3 py-2 text-sm text-left text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center space-x-2"
                     >
                       <Edit2 className="w-3 h-3" />
                       <span>Edit</span>
@@ -206,7 +206,7 @@ const MessageBubble = ({
                         onReply(message.id);
                         setShowMenu(false);
                       }}
-                      className="w-full px-3 py-2 text-sm text-left hover:bg-gray-50 flex items-center space-x-2"
+                      className="w-full px-3 py-2 text-sm text-left text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center space-x-2"
                     >
                       <Reply className="w-3 h-3" />
                       <span>Reply</span>
@@ -218,7 +218,7 @@ const MessageBubble = ({
                       e.stopPropagation();
                       handleCopy();
                     }}
-                    className="w-full px-3 py-2 text-sm text-left hover:bg-gray-50 flex items-center space-x-2"
+                    className="w-full px-3 py-2 text-sm text-left text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center space-x-2"
                   >
                     <Copy className="w-3 h-3" />
                     <span>Copy</span>
@@ -231,7 +231,7 @@ const MessageBubble = ({
                         onDelete(message.id);
                         setShowMenu(false);
                       }}
-                      className="w-full px-3 py-2 text-sm text-left hover:bg-gray-50 text-red-600 flex items-center space-x-2"
+                      className="w-full px-3 py-2 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-red-600 dark:text-red-400 flex items-center space-x-2"
                     >
                       <Trash2 className="w-3 h-3" />
                       <span>Delete</span>
@@ -245,9 +245,9 @@ const MessageBubble = ({
 
         {/* Message Text */}
         <div className={`
-          max-w-none prose prose-sm 
+          max-w-none prose prose-sm text-gray-900 dark:text-gray-100
           ${isUser ? 'text-right' : ''}
-          ${isSystem ? 'text-gray-600 italic' : ''}
+          ${isSystem ? 'text-gray-600 dark:text-gray-400 italic' : ''}
         `}>
           {isEditing ? (
             <div className="space-y-2">
@@ -255,7 +255,7 @@ const MessageBubble = ({
                 ref={textareaRef}
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
-                className="w-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white dark:text-gray-100 dark:bg-gray-800 dark:border-gray-600"
                 rows={3}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -346,7 +346,7 @@ const MessageBubble = ({
         )}
 
         {/* Timestamp */}
-        <div className={`text-xs text-gray-500 mt-2 ${isUser ? 'text-right' : ''}`}>
+        <div className={`text-xs text-gray-500 dark:text-gray-400 mt-2 ${isUser ? 'text-right' : ''}`}>
           {new Date(message.createdAt).toLocaleString()}
           {message.editedAt && (
             <span className="ml-1">

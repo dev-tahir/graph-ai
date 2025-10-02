@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { streamText } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { google } from '@ai-sdk/google';
 import { prisma } from '@/lib/prisma';
 import { processFile } from '@/lib/file-processing';
 
@@ -100,7 +100,7 @@ Always include complete Chart.js configuration with proper styling, colors, and 
     ];
 
     const result = await streamText({
-      model: openai('gpt-4-turbo-preview'),
+      model: google('gemini-2.0-flash'),
       messages: messagesWithSystem,
       temperature: 0.3,
       async onFinish({ text, finishReason, usage }) {
