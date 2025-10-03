@@ -99,7 +99,8 @@ export async function POST(req: NextRequest) {
       },
       data: processedData ? {
         headers: processedData.headers,
-        sampleRows: processedData.rows.slice(0, 5), // First 5 rows for preview
+        rows: processedData.rows, // Return all rows for full context
+        sampleRows: processedData.rows.slice(0, 5), // Keep sample for preview
         type: processedData.type,
         analysis,
       } : null,

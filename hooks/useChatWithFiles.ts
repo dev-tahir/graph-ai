@@ -68,7 +68,17 @@ export function useChatWithFiles({
       // Load messages from local storage
       const chat = localStorageManager.getChat(chatId);
       if (chat) {
-        setMessages(chat.messages || []);
+        const chatMessages = chat.messages || [];
+        setMessages(chatMessages);
+        
+        // Restore uploaded files from chat messages
+        const filesFromMessages: StoredFile[] = [];
+        chatMessages.forEach(msg => {
+          if (msg.files) {
+            filesFromMessages.push(...msg.files);
+          }
+        });
+        setUploadedFiles(filesFromMessages);
       } else {
         // If not in local storage, try to load from API (for authenticated users)
         if (session?.user) {
@@ -76,11 +86,9 @@ export function useChatWithFiles({
         } else {
           // New chat for guest user
           setMessages([]);
+          setUploadedFiles([]);
         }
       }
-      
-      // Reset uploaded files for new chat
-      setUploadedFiles([]);
     } else if (!chatId) {
       // New chat
       currentChatId.current = nanoid();
@@ -108,6 +116,15 @@ export function useChatWithFiles({
         
         setMessages(apiMessages);
         
+        // Restore uploaded files from API messages
+        const filesFromMessages: StoredFile[] = [];
+        apiMessages.forEach((msg: StoredMessage) => {
+          if (msg.files) {
+            filesFromMessages.push(...msg.files);
+          }
+        });
+        setUploadedFiles(filesFromMessages);
+        
         // Save to local storage for future use
         const storedChat = {
           id: chatIdToLoad,
@@ -120,10 +137,12 @@ export function useChatWithFiles({
       } else {
         console.warn(`Chat ${chatIdToLoad} not found in API`);
         setMessages([]);
+        setUploadedFiles([]);
       }
     } catch (error) {
       console.error('Failed to load chat from API:', error);
       setMessages([]);
+      setUploadedFiles([]);
     }
   };
 
@@ -236,7 +255,7 @@ export function useChatWithFiles({
           })),
           chatId: currentChatId.current,
           userId: userId,
-          fileData: uploadedFiles.map(file => ({
+          fileData: [...uploadedFiles, ...filesToAttach].map(file => ({
             originalName: file.originalName,
             type: file.data?.type,
             headers: file.data?.headers,

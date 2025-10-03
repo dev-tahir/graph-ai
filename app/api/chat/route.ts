@@ -92,7 +92,7 @@ Always include complete Chart.js configuration with proper styling, colors, and 
 - Type: ${file.type}
 - Columns: ${file.headers ? file.headers.join(', ') : 'Unknown'}
 - Rows: ${file.rows ? file.rows.length : 'Unknown'}
-- Sample data: ${file.rows ? JSON.stringify(file.rows.slice(0, 3)) : 'None'}`;
+- All data: ${file.rows ? JSON.stringify(file.rows) : 'None'}`;
 
         if (file.analysis) {
           systemPrompt += `
