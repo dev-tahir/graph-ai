@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import Papa, { ParseResult } from 'papaparse';
+import Papa from 'papaparse';
 
 export interface ProcessedData {
   headers: string[];
@@ -12,44 +12,58 @@ export function validateFile(file: File): boolean {
     'text/csv',
     'application/json',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel'
+    'application/vnd.ms-excel',
+    'application/octet-stream' // Added for files with incorrect mime detection
   ];
   
   const maxSize = 10 * 1024 * 1024; // 10MB
   
-  return allowedTypes.includes(file.type) && file.size <= maxSize;
+  // Check file extension as fallback for mime type detection issues
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  const allowedExtensions = ['csv', 'json', 'xlsx', 'xls'];
+  
+  const isValidType = allowedTypes.includes(file.type) || allowedExtensions.includes(extension || '');
+  
+  return isValidType && file.size <= maxSize;
 }
 
 export async function processCSV(file: File): Promise<ProcessedData> {
-  return new Promise((resolve, reject) => {
-    Papa.parse(file, {
-      header: false,
-      complete: (results: ParseResult<string[]>) => {
-        if (results.errors.length > 0) {
-          reject(new Error(`CSV parsing error: ${results.errors[0].message}`));
-          return;
+  try {
+    // Convert File to text first for server-side processing
+    const text = await file.text();
+    
+    return new Promise((resolve, reject) => {
+      Papa.parse(text, {
+        header: false,
+        complete: (results: any) => {
+          if (results.errors.length > 0) {
+            reject(new Error(`CSV parsing error: ${results.errors[0].message}`));
+            return;
+          }
+          
+          const data = results.data as string[][];
+          if (data.length === 0) {
+            reject(new Error('CSV file is empty'));
+            return;
+          }
+          
+          const headers = data[0];
+          const rows = data.slice(1).filter(row => row.some(cell => cell?.trim()));
+          
+          resolve({
+            headers,
+            rows,
+            type: 'csv'
+          });
+        },
+        error: (error: Error) => {
+          reject(new Error(`CSV parsing error: ${error.message}`));
         }
-        
-        const data = results.data as string[][];
-        if (data.length === 0) {
-          reject(new Error('CSV file is empty'));
-          return;
-        }
-        
-        const headers = data[0];
-        const rows = data.slice(1).filter(row => row.some(cell => cell?.trim()));
-        
-        resolve({
-          headers,
-          rows,
-          type: 'csv'
-        });
-      },
-      error: (error: Error) => {
-        reject(new Error(`CSV parsing error: ${error.message}`));
-      }
+      });
     });
-  });
+  } catch (error) {
+    throw new Error(`Failed to read CSV file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 export async function processJSON(file: File): Promise<ProcessedData> {
@@ -124,17 +138,26 @@ export async function processFile(file: File): Promise<ProcessedData> {
     throw new Error('Invalid file type or size');
   }
   
-  switch (file.type) {
-    case 'text/csv':
-      return processCSV(file);
-    case 'application/json':
-      return processJSON(file);
-    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-    case 'application/vnd.ms-excel':
-      return processExcel(file);
-    default:
-      throw new Error('Unsupported file type');
+  // Get file extension for fallback detection
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  
+  // Check mime type first, then fall back to extension
+  if (file.type === 'text/csv' || extension === 'csv') {
+    return processCSV(file);
   }
+  
+  if (file.type === 'application/json' || extension === 'json') {
+    return processJSON(file);
+  }
+  
+  if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+      file.type === 'application/vnd.ms-excel' ||
+      extension === 'xlsx' || 
+      extension === 'xls') {
+    return processExcel(file);
+  }
+  
+  throw new Error(`Unsupported file type: ${file.type} with extension: ${extension}`);
 }
 
 export function analyzeData(data: ProcessedData): {
